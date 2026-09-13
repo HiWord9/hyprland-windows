@@ -35,23 +35,24 @@ artifact, not a source file.
 
 ## Building
 
-Requires [Windhawk](https://windhawk.net/) installed (its bundled clang and
-`windhawk.lib` are used) and Python 3.
+Assembling the single file needs nothing but Python 3:
 
 ```powershell
-.\build.ps1            # bundle + mod DLLs + harness
+python tools\bundle.py          # -> build\hyprland-windows.wh.cpp
+```
+
+`build.ps1` wraps that and builds the tests around it, which additionally
+needs [Windhawk](https://windhawk.net/) installed for its bundled clang:
+
+```powershell
+.\build.ps1            # bundle + harness
 .\build.ps1 -Bundle    # only build\hyprland-windows.wh.cpp
-.\build.ps1 -Mod       # bundle + out\mod64.dll, out\mod32.dll
 .\build.ps1 -Harness   # bundle + test\harness.exe
 .\build.ps1 -Check     # syntax-check every src\*.cpp on its own
 ```
 
-To install: build the bundle and paste `build/hyprland-windows.wh.cpp` into the
-Windhawk editor, or just run the bundler on its own:
-
-```powershell
-python tools\bundle.py
-```
+The mod itself is never compiled here: Windhawk compiles the `.wh.cpp` on the
+user's machine, so a DLL is not something this project produces.
 
 `compile_flags.txt` gives editors/clangd the include paths for the Windhawk
 toolchain; if Windhawk is not in `C:\Program Files\Windhawk`, adjust the two
