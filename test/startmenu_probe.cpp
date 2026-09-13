@@ -236,7 +236,7 @@ int main() {
     setvbuf(stdout, nullptr, _IONBF, 0);
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-    // A frameless popup so the hypr-frameless mod (if installed) ignores
+    // A frameless popup so the hyprland-windows mod (if installed) ignores
     // clicks on it and doesn't inject anything itself.
     WNDCLASSW wc{};
     wc.lpfnWndProc = DefWindowProcW;

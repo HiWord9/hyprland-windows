@@ -13,7 +13,7 @@ $root = $PSScriptRoot
 $compiler = 'C:\Program Files\Windhawk\Compiler'
 $clang = "$compiler\bin\clang++.exe"
 $engine = 'C:\Program Files\Windhawk\Engine\1.7.3'
-$modId = 'hypr-frameless'
+$modId = 'hyprland-windows'
 $modVersion = (Select-String -Path "$root\mod.wh.cpp" -Pattern '^// @version\s+(\S+)').Matches[0].Groups[1].Value
 
 $common = @('-std=c++23', '-DUNICODE', '-D_UNICODE', '-DWINVER=0x0A00', '-D_WIN32_WINNT=0x0A00',

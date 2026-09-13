@@ -182,7 +182,7 @@ static HWND CreateTestWindow(PCWSTR title, bool withMenu, int x, int y) {
         WNDCLASSW wc{};
         wc.lpfnWndProc = TestWndProc;
         wc.hInstance = GetModuleHandleW(nullptr);
-        wc.lpszClassName = L"HyprFramelessTestWnd";
+        wc.lpszClassName = L"HyprlandWindowsTestWnd";
         wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
         wc.style = CS_HREDRAW | CS_VREDRAW;
         RegisterClassW(&wc);
@@ -199,7 +199,7 @@ static HWND CreateTestWindow(PCWSTR title, bool withMenu, int x, int y) {
         AppendMenuW(menu, MF_STRING, 3, L"&Help");
     }
 
-    HWND hwnd = CreateWindowExW(WS_EX_TOPMOST, L"HyprFramelessTestWnd", title,
+    HWND hwnd = CreateWindowExW(WS_EX_TOPMOST, L"HyprlandWindowsTestWnd", title,
                                 WS_OVERLAPPEDWINDOW, x, y, 560, 360, nullptr,
                                 menu, GetModuleHandleW(nullptr), nullptr);
     // A child control covering part of the client, like real apps have.
@@ -214,8 +214,8 @@ static HWND CreateTestWindow(PCWSTR title, bool withMenu, int x, int y) {
     // default"). Ask it to put the title bar back so the copy compiled into
     // the harness is the only one acting on the window.
     static const UINT realModMsgs[] = {
-        RegisterWindowMessageW(L"HyprFrameless_local@hypr-frameless"),
-        RegisterWindowMessageW(L"HyprFrameless_hypr-frameless"),
+        RegisterWindowMessageW(L"HyprlandWindows_local@hyprland-windows"),
+        RegisterWindowMessageW(L"HyprlandWindows_hyprland-windows"),
     };
     for (UINT m : realModMsgs) {
         PostMessageW(hwnd, m, kActionShow, 0);
@@ -233,7 +233,7 @@ static bool RealModLoaded() {
     bool found = false;
     for (BOOL ok = Module32FirstW(snap, &me); ok && !found;
          ok = Module32NextW(snap, &me)) {
-        found = wcsstr(me.szModule, L"hypr-frameless") != nullptr;
+        found = wcsstr(me.szModule, L"hyprland-windows") != nullptr;
     }
     CloseHandle(snap);
     return found;
@@ -715,7 +715,7 @@ int main(int argc, char** argv) {
     }
 
     if (RealModLoaded()) {
-        printf("note: the real hypr-frameless mod is injected into this "
+        printf("note: the real hyprland-windows mod is injected into this "
                "process; test windows ask it to restore their title bars\n");
     }
 

@@ -13,6 +13,15 @@ static HWND g_found;
 static std::string g_classWant;
 static DWORD g_pidWant;
 
+// Screenshots go to the "out" directory next to the probe executable.
+static std::string OutDir() {
+    char path[MAX_PATH];
+    GetModuleFileNameA(nullptr, path, MAX_PATH);
+    std::string dir = path;
+    dir.erase(dir.find_last_of("\\/") + 1);
+    return dir + "out\\";
+}
+
 static BOOL CALLBACK EnumProc(HWND hwnd, LPARAM) {
     if (!IsWindowVisible(hwnd) || GetWindow(hwnd, GW_OWNER)) {
         return TRUE;
@@ -82,8 +91,7 @@ static void Shot(HWND hwnd, const char* name) {
     HGDIOBJ old = SelectObject(mem, bmp);
     BitBlt(mem, 0, 0, w, h, screen, rc.left, rc.top, SRCCOPY | CAPTUREBLT);
     GdiFlush();
-    std::string path =
-        std::string("D:\\Projects\\hypr-frameless\\test\\out\\") + name + ".bmp";
+    std::string path = OutDir() + name + ".bmp";
     printf("  shot %s (%dx%d): %s\n", name, w, h,
            SaveBmp(path.c_str(), w, h, bits) ? "ok" : "FAIL");
     SelectObject(mem, old);
@@ -143,7 +151,7 @@ int main(int argc, char** argv) {
         printf("no matching window found\n");
         return 1;
     }
-    CreateDirectoryA("D:\\Projects\\hypr-frameless\\test\\out", nullptr);
+    CreateDirectoryA(OutDir().c_str(), nullptr);
     SetForegroundWindow(g_found);
     Sleep(500);
 

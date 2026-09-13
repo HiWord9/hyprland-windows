@@ -1,7 +1,7 @@
 // ==WindhawkMod==
-// @id              hypr-frameless
-// @name            Hyprland-style Frameless Windows
-// @description     Hotkey to hide a window's title bar completely, plus Win+LMB drag to move and Win+RMB drag to resize any window, like in Hyprland
+// @id              hyprland-windows
+// @name            Hyprland Windows
+// @description     Move and resize any window with Win + mouse anywhere on it, like in Hyprland, plus a hotkey that hides the title bar completely
 // @version         0.0.1
 // @author          hiword9
 // @include         *
@@ -10,26 +10,31 @@
 
 // ==WindhawkModReadme==
 /*
-# Hyprland-style Frameless Windows
+# Hyprland Windows
 
-Brings the Hyprland window feel to Windows:
+Brings the Hyprland window feel to Windows - grab any window with
+`Win` + the mouse, wherever the cursor happens to be:
 
+* **Win + left mouse button** anywhere on a window moves it. The click is not
+  delivered to the application. Because the system's own drag is used, the
+  screen edges still snap, dragging to the top still opens the Windows 11
+  snap layouts, and a maximized window is restored first - exactly as if you
+  had dragged its title bar.
+* **Win + right mouse button** anywhere on a window resizes it, relative to
+  where you grabbed, from the corner nearest to the cursor - like
+  `SUPER + RMB` in Hyprland. This also runs the system's real resize, so
+  GPU-composited windows (Chrome, Electron) redraw live while you drag.
+* `Esc` during a move or resize cancels it and puts the window back.
 * **Hotkey** (default `Ctrl+Alt+H`) toggles the title bar of the focused
   window. The title bar is removed *completely* - no leftover frame strip at
   the top, the window content starts at the very first pixel. Snapping,
   maximize/restore animations, `Alt+Space`, shadows and rounded corners keep
   working because the window keeps its native styles; only the non-client
   layout is changed (the same technique Windows Terminal uses).
-* **Win + left mouse button** anywhere on a window drags it. The click is not
-  delivered to the application. Dragging a maximized window restores it first,
-  like dragging its title bar would.
-* **Win + right mouse button** anywhere on a window resizes it from the corner
-  nearest to the cursor, exactly like `SUPER + RMB` in Hyprland.
-* `Esc` during a drag cancels it and puts the window back.
 
-Nothing is hidden by default - press the hotkey on a window to hide its title
-bar, press it again to bring the title bar back. Disabling the mod restores
-every window it touched.
+Win + mouse works everywhere right away. Title bars are kept by default -
+press the hotkey on a window to hide its title bar, press it again to bring it
+back. Disabling the mod restores every window it touched.
 
 ## Notes
 
@@ -103,9 +108,9 @@ every window it touched.
   - inactive: ""
     $name: Inactive window
     $description: '"#RRGGBB" for a color, "none" for no border, empty for the system default'
-  $name: Border color of frameless windows
+  $name: Border color of windows with a hidden title bar
 - corners: default
-  $name: Corners of frameless windows
+  $name: Corners of windows with a hidden title bar
   $options:
   - default: System default
   - round: Rounded
@@ -1199,7 +1204,7 @@ HWND WINAPI CreateWindowExA_Hook(DWORD dwExStyle,
 BOOL Wh_ModInit() {
     Wh_Log(L"Init");
 
-    g_msgFrameless = RegisterWindowMessageW(L"HyprFrameless_" WH_MOD_ID);
+    g_msgFrameless = RegisterWindowMessageW(L"HyprlandWindows_" WH_MOD_ID);
     if (!g_msgFrameless) {
         Wh_Log(L"RegisterWindowMessage failed");
         return FALSE;

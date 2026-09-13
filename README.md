@@ -1,8 +1,9 @@
-# hypr-frameless
+# hyprland-windows
 
-A [Windhawk](https://windhawk.net/) mod that brings the Hyprland window feel to
-Windows 11: a hotkey hides a window's title bar completely, `Win + LMB` drags
-any window, `Win + RMB` resizes it from the nearest corner.
+**Hyprland Windows** — a [Windhawk](https://windhawk.net/) mod that brings the
+Hyprland window feel to Windows 11: `Win + LMB` moves any window from anywhere
+on it, `Win + RMB` resizes it from the nearest corner, and a hotkey hides a
+window's title bar completely.
 
 The mod itself is the single file `mod.wh.cpp` (readme and settings are inside
 it, as Windhawk expects). Paste it into the Windhawk editor and compile.
