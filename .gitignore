@@ -1,5 +1,6 @@
 # generated: the single-file mod that tools/bundle.py assembles from src/
 build/
+dist/
 
 # build output
 out/

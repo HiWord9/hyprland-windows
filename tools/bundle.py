@@ -10,9 +10,10 @@ Because every cross-file declaration is in common.h, the concatenation order
 does not affect correctness - it is fixed only so the output is reproducible
 and reads top-down.
 
-    python tools/bundle.py                 -> build/<id>.wh.cpp
-    python tools/bundle.py -o dist         -> dist/<id>.wh.cpp
-    python tools/bundle.py --print-name    -> just print the output file name
+    python tools/bundle.py                  -> build/<id>.wh.cpp
+    python tools/bundle.py -o dist          -> dist/<id>.wh.cpp
+    python tools/bundle.py --print-name     -> just print the output file name
+    python tools/bundle.py --print-version  -> just print @version
 """
 
 from __future__ import annotations
@@ -73,13 +74,13 @@ def banner(title: str) -> str:
     return f"{rule}\n// {title}\n{rule}"
 
 
-def bundle() -> tuple[str, str]:
+def bundle() -> tuple[str, str, str]:
     if not METADATA.is_file():
         sys.exit(f"error: missing {METADATA}")
     if not HEADER.is_file():
         sys.exit(f"error: missing {HEADER}")
 
-    metadata, mod_id, _version = read_metadata()
+    metadata, mod_id, version = read_metadata()
 
     listed = set(MODULES)
     present = {p.name for p in SRC.glob("*.cpp")}
@@ -107,7 +108,7 @@ def bundle() -> tuple[str, str]:
             strip_scaffolding((SRC / name).read_text(encoding="utf-8")),
         ]
 
-    return mod_id, "\n".join(parts) + "\n"
+    return mod_id, version, "\n".join(parts) + "\n"
 
 
 def main() -> None:
@@ -123,12 +124,20 @@ def main() -> None:
         action="store_true",
         help="print the output file name and exit without writing",
     )
+    ap.add_argument(
+        "--print-version",
+        action="store_true",
+        help="print the mod's @version and exit without writing",
+    )
     args = ap.parse_args()
 
-    mod_id, text = bundle()
+    mod_id, version, text = bundle()
     name = f"{mod_id}.wh.cpp"
     if args.print_name:
         print(name)
+        return
+    if args.print_version:
+        print(version)
         return
 
     out_dir = Path(args.out_dir)

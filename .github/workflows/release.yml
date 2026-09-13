@@ -1,0 +1,52 @@
+name: Release
+
+# A Windhawk mod is distributed as its .wh.cpp source - Windhawk compiles it on
+# the user's machine - so publishing a release just needs to assemble that one
+# file from src/ and attach it. workflow_dispatch is there to exercise the job
+# without cutting a release.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    name: Bundle the single-file mod
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Bundle
+        id: bundle
+        run: |
+          name="$(python tools/bundle.py --print-name)"
+          python tools/bundle.py -o dist
+          echo "file=$name" >> "$GITHUB_OUTPUT"
+          ls -l "dist/$name"
+
+      - name: Check the version matches the tag
+        if: github.event_name == 'release'
+        run: |
+          version="$(python tools/bundle.py --print-version)"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$version" != "$tag" ]; then
+            echo "::warning::@version in src/metadata.wh is $version but the release tag is $tag"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mod-source
+          path: dist/${{ steps.bundle.outputs.file }}
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" "dist/${{ steps.bundle.outputs.file }}" --clobber
