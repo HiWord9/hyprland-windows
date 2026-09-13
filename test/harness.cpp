@@ -1,10 +1,11 @@
-// Test harness for mod.wh.cpp. Compiles the mod source with Windhawk's
-// WH_EDITING stubs and exercises it against real windows on the desktop.
+// Test harness for the mod. Compiles the *bundled* mod (so the bundler itself
+// is covered too) with Windhawk's WH_EDITING stubs and exercises it against
+// real windows on the desktop. Run build.ps1, which bundles first.
 //
 // Usage: harness.exe [--dpi-unaware] [--no-input]
 //   --dpi-unaware   don't opt into per-monitor DPI awareness
 //   --no-input      skip the tests that inject mouse input
-#include "../mod.wh.cpp"
+#include "../build/hyprland-windows.wh.cpp"
 
 #include <tlhelp32.h>
 

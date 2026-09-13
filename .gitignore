@@ -1,3 +1,6 @@
+# generated: the single-file mod that tools/bundle.py assembles from src/
+build/
+
 # build output
 out/
 test/out/

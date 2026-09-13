@@ -1,0 +1,120 @@
+// ==WindhawkMod==
+// @id              hyprland-windows
+// @name            Hyprland Windows
+// @description     Move and resize any window with Win + mouse anywhere on it, like in Hyprland, plus a hotkey that hides the title bar completely
+// @version         0.0.1
+// @author          hiword9
+// @include         *
+// @compilerOptions -lcomctl32 -ldwmapi
+// ==/WindhawkMod==
+
+// ==WindhawkModReadme==
+/*
+# Hyprland Windows
+
+Brings the Hyprland window feel to Windows - grab any window with
+`Win` + the mouse, wherever the cursor happens to be:
+
+* **Win + left mouse button** anywhere on a window moves it. The click is not
+  delivered to the application. Because the system's own drag is used, the
+  screen edges still snap, dragging to the top still opens the Windows 11
+  snap layouts, and a maximized window is restored first - exactly as if you
+  had dragged its title bar.
+* **Win + right mouse button** anywhere on a window resizes it, relative to
+  where you grabbed, from the corner nearest to the cursor - like
+  `SUPER + RMB` in Hyprland. This also runs the system's real resize, so
+  GPU-composited windows (Chrome, Electron) redraw live while you drag.
+* `Esc` during a move or resize cancels it and puts the window back.
+* **Hotkey** (default `Ctrl+Alt+H`) toggles the title bar of the focused
+  window. The title bar is removed *completely* - no leftover frame strip at
+  the top, the window content starts at the very first pixel. Snapping,
+  maximize/restore animations, `Alt+Space`, shadows and rounded corners keep
+  working because the window keeps its native styles; only the non-client
+  layout is changed (the same technique Windows Terminal uses).
+
+Win + mouse works everywhere right away. Title bars are kept by default -
+press the hotkey on a window to hide its title bar, press it again to bring it
+back. Disabling the mod restores every window it touched.
+
+## Notes
+
+* Windows with a classic (non-client) menu bar: Windows lays that bar out
+  from the title bar metrics, so it can't stay in place once the title bar is
+  gone. By default it's hidden together with the title bar and stays reachable
+  from the keyboard (`Alt`, `F10`, `Alt+letter`). The `Windows with a menu bar`
+  setting can instead keep the menu bar (only the title bar is removed, a thin
+  frame strip remains above the menu) or leave such windows alone.
+* When the title bar is hidden the top edge of the window still works as a
+  resize handle (can be disabled in the settings).
+* Applications that draw their own title bar inside the client area (Chromium
+  based browsers, Electron apps, VS Code, Office, UWP apps) cannot be fixed by
+  any mod - tell those apps to use the native title bar instead.
+* `Hide title bars by default` applies to windows created through
+  `CreateWindowEx`; the hotkey works for every window.
+* The border color / corner settings only affect windows whose title bar is
+  hidden and are meant to mimic Hyprland's `col.active_border` /
+  `col.inactive_border` / `rounding`.
+*/
+// ==/WindhawkModReadme==
+
+// ==WindhawkModSettings==
+/*
+- hotkey:
+  - key: H
+    $name: Key
+    $description: >-
+      A letter, a digit, F1-F24, or a key name such as Space, Enter, Insert,
+      Home, PageUp, Up, NumPad5. Leave empty to disable the hotkey.
+  - ctrl: true
+    $name: Ctrl
+  - alt: true
+    $name: Alt
+  - shift: false
+    $name: Shift
+  - win: false
+    $name: Win
+  $name: Toggle title bar hotkey
+  $description: Hides or restores the title bar of the focused window
+- dragModifier: win
+  $name: Move/resize modifier key
+  $description: >-
+    Hold this key and drag with the left mouse button to move a window, or with
+    the right mouse button to resize it
+  $options:
+  - win: Win (Super)
+  - alt: Alt
+- topEdgeResize: true
+  $name: Resize from the top edge
+  $description: >-
+    When the title bar is hidden, the top few pixels of the window act as a
+    resize handle, like the other edges
+- menuBarWindows: hide
+  $name: Windows with a menu bar
+  $description: >-
+    What to do with windows that have a classic menu bar below the title bar
+  $options:
+  - hide: Hide the menu bar too (keyboard access via Alt / F10 still works)
+  - keepMenu: Keep the menu bar, remove only the title bar
+  - skip: Don't touch such windows
+- hideByDefault: false
+  $name: Hide title bars by default
+  $description: >-
+    Automatically hide the title bar of every new window. Use the hotkey to
+    bring it back for a specific window.
+- border:
+  - active: ""
+    $name: Active window
+    $description: '"#RRGGBB" for a color, "none" for no border, empty for the system default'
+  - inactive: ""
+    $name: Inactive window
+    $description: '"#RRGGBB" for a color, "none" for no border, empty for the system default'
+  $name: Border color of windows with a hidden title bar
+- corners: default
+  $name: Corners of windows with a hidden title bar
+  $options:
+  - default: System default
+  - round: Rounded
+  - roundsmall: Slightly rounded
+  - none: Square
+*/
+// ==/WindhawkModSettings==
