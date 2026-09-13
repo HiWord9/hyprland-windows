@@ -1,0 +1,9 @@
+# build output
+out/
+test/out/
+*.dll
+*.exe
+*.pdb
+
+# test run logs
+test/*.txt
