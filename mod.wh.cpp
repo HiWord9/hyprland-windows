@@ -1033,36 +1033,16 @@ void StartMove(HWND root, HWND capture, POINT pt) {
         return;
     }
 
-    if (IsZoomed(root)) {
-        // Same as dragging the caption of a maximized window: restore it and
-        // keep the cursor at the same relative position inside the window.
-        RECT rcMax;
-        GetWindowRect(root, &rcMax);
-        double fx = rcMax.right > rcMax.left
-                        ? (pt.x - rcMax.left) / double(rcMax.right - rcMax.left)
-                        : 0.5;
-        double fy = rcMax.bottom > rcMax.top
-                        ? (pt.y - rcMax.top) / double(rcMax.bottom - rcMax.top)
-                        : 0.5;
-
-        ShowWindow(root, SW_RESTORE);
-
-        RECT rc;
-        GetWindowRect(root, &rc);
-        int width = rc.right - rc.left;
-        int height = rc.bottom - rc.top;
-        SetWindowPos(root, nullptr, pt.x - (int)(fx * width),
-                     pt.y - (int)(fy * height), 0, 0,
-                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    // Hand the move to the window's own thread so the *system* runs its native
+    // caption-drag loop. That gives everything a title-bar drag would: Aero
+    // Snap at the screen edges, the Windows 11 snap-layouts flyout when the
+    // cursor reaches the top, and automatic restore of a maximized window.
+    LPARAM lp = MAKELPARAM(pt.x, pt.y);
+    if (GetWindowThreadProcessId(root, nullptr) == GetCurrentThreadId()) {
+        DefWindowProcW(root, WM_SYSCOMMAND, SC_MOVE | HTCAPTION, lp);
+    } else {
+        PostMessageW(root, WM_SYSCOMMAND, SC_MOVE | HTCAPTION, lp);
     }
-
-    DragSession s{root, capture,       pt,
-                  {},   0,             WM_LBUTTONUP,
-                  WM_NCLBUTTONUP,      PhysicalButtonVk(false)};
-    if (!GetWindowRect(root, &s.original)) {
-        return;
-    }
-    RunDragLoop(s);
 }
 
 // Hyprland resizes from the corner nearest to the cursor.
