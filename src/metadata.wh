@@ -59,22 +59,12 @@ back. Disabling the mod restores every window it touched.
 
 // ==WindhawkModSettings==
 /*
-- hotkey:
-  - key: H
-    $name: Key
-    $description: >-
-      A letter, a digit, F1-F24, or a key name such as Space, Enter, Insert,
-      Home, PageUp, Up, NumPad5. Leave empty to disable the hotkey.
-  - ctrl: true
-    $name: Ctrl
-  - alt: true
-    $name: Alt
-  - shift: false
-    $name: Shift
-  - win: false
-    $name: Win
-  $name: Toggle title bar hotkey
-  $description: Hides or restores the title bar of the focused window
+- hotkey: Ctrl+Alt+H
+  $name: Title bar hotkey
+  $description: >-
+    Hides or restores the title bar of the focused window. Combine Ctrl, Alt,
+    Shift and Win with "+", for example Ctrl+Alt+H or Win+Shift+T. Set it to
+    "none" to turn the hotkey off.
 - dragModifier: win
   $name: Move/resize modifier key
   $description: >-
@@ -101,14 +91,16 @@ back. Disabling the mod restores every window it touched.
   $description: >-
     Automatically hide the title bar of every new window. Use the hotkey to
     bring it back for a specific window.
-- border:
-  - active: ""
-    $name: Active window
-    $description: '"#RRGGBB" for a color, "none" for no border, empty for the system default'
-  - inactive: ""
-    $name: Inactive window
-    $description: '"#RRGGBB" for a color, "none" for no border, empty for the system default'
-  $name: Border color of windows with a hidden title bar
+- borderActive: ""
+  $name: Border color of the active window
+  $description: >-
+    Only affects windows with a hidden title bar. "#RRGGBB" for a color, "none"
+    for no border, empty for the system default.
+- borderInactive: ""
+  $name: Border color of inactive windows
+  $description: >-
+    Only affects windows with a hidden title bar. "#RRGGBB" for a color, "none"
+    for no border, empty for the system default.
 - corners: default
   $name: Corners of windows with a hidden title bar
   $options:

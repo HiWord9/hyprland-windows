@@ -135,13 +135,53 @@ int ParseCorners(PCWSTR raw) {
     return DWMWCP_DEFAULT;
 }
 
+// Splits "Ctrl+Alt+H" into the key and its modifiers. An empty setting means
+// "use the default", so the hotkey works even before Windhawk has written the
+// settings out; "none" is how you turn it off.
+Hotkey ParseHotkey(PCWSTR raw) {
+    std::wstring spec = NormalizeSettingString(raw);
+    if (spec.empty()) {
+        spec = NormalizeSettingString(kDefaultHotkey);
+    }
+    if (spec == L"NONE" || spec == L"OFF" || spec == L"-") {
+        return {};
+    }
+
+    Hotkey hotkey{};
+    size_t pos = 0;
+    while (pos <= spec.size()) {
+        size_t plus = spec.find(L'+', pos);
+        std::wstring token =
+            spec.substr(pos, plus == std::wstring::npos ? plus : plus - pos);
+        pos = plus == std::wstring::npos ? spec.size() + 1 : plus + 1;
+
+        token = NormalizeSettingString(token.c_str());
+        if (token.empty()) {
+            continue;  // a stray or trailing "+"
+        }
+        if (token == L"CTRL" || token == L"CONTROL") {
+            hotkey.ctrl = true;
+        } else if (token == L"ALT") {
+            hotkey.alt = true;
+        } else if (token == L"SHIFT") {
+            hotkey.shift = true;
+        } else if (token == L"WIN" || token == L"SUPER" || token == L"META") {
+            hotkey.win = true;
+        } else {
+            hotkey.vk = ParseKeyName(token.c_str());
+        }
+    }
+    return hotkey;
+}
+
 void LoadSettings() {
-    WindhawkUtils::StringSetting key(Wh_GetStringSetting(L"hotkey.key"));
-    g_settings.hotkeyVk = ParseKeyName(key);
-    g_settings.hotkeyCtrl = Wh_GetIntSetting(L"hotkey.ctrl") != 0;
-    g_settings.hotkeyAlt = Wh_GetIntSetting(L"hotkey.alt") != 0;
-    g_settings.hotkeyShift = Wh_GetIntSetting(L"hotkey.shift") != 0;
-    g_settings.hotkeyWin = Wh_GetIntSetting(L"hotkey.win") != 0;
+    WindhawkUtils::StringSetting hotkey(Wh_GetStringSetting(L"hotkey"));
+    Hotkey parsed = ParseHotkey(hotkey);
+    g_settings.hotkeyVk = parsed.vk;
+    g_settings.hotkeyCtrl = parsed.ctrl;
+    g_settings.hotkeyAlt = parsed.alt;
+    g_settings.hotkeyShift = parsed.shift;
+    g_settings.hotkeyWin = parsed.win;
 
     WindhawkUtils::StringSetting modifier(Wh_GetStringSetting(L"dragModifier"));
     g_settings.dragModifier = NormalizeSettingString(modifier) == L"ALT"
@@ -153,9 +193,9 @@ void LoadSettings() {
     g_settings.menuBarMode = ParseMenuBarMode(menuBar);
     g_settings.hideByDefault = Wh_GetIntSetting(L"hideByDefault") != 0;
 
-    WindhawkUtils::StringSetting active(Wh_GetStringSetting(L"border.active"));
+    WindhawkUtils::StringSetting active(Wh_GetStringSetting(L"borderActive"));
     WindhawkUtils::StringSetting inactive(
-        Wh_GetStringSetting(L"border.inactive"));
+        Wh_GetStringSetting(L"borderInactive"));
     g_settings.borderActive = ParseBorderColor(active);
     g_settings.borderInactive = ParseBorderColor(inactive);
 

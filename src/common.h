@@ -47,8 +47,20 @@ struct Settings {
 
 extern Settings g_settings;
 
+// A parsed key combination. vk == 0 means "no hotkey".
+struct Hotkey {
+    UINT vk = 0;
+    bool ctrl = false;
+    bool alt = false;
+    bool shift = false;
+    bool win = false;
+};
+
+constexpr PCWSTR kDefaultHotkey = L"Ctrl+Alt+H";
+
 std::wstring NormalizeSettingString(PCWSTR raw);
 UINT ParseKeyName(PCWSTR raw);
+Hotkey ParseHotkey(PCWSTR raw);
 COLORREF ParseBorderColor(PCWSTR raw);
 MenuBarMode ParseMenuBarMode(PCWSTR raw);
 int ParseCorners(PCWSTR raw);

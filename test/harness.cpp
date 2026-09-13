@@ -280,6 +280,31 @@ static void TestParsers() {
     CHECK(ParseCorners(L"none") == DWMWCP_DONOTROUND, "corners none");
     CHECK(ParseCorners(L"default") == DWMWCP_DEFAULT, "corners default");
 
+    // An unset setting must fall back to the default combo, or a fresh install
+    // where Windhawk has not written the settings out would have no hotkey.
+    Hotkey def = ParseHotkey(L"");
+    CHECK(def.vk == 'H' && def.ctrl && def.alt && !def.shift && !def.win,
+          "hotkey '' falls back to Ctrl+Alt+H");
+    Hotkey explicitCombo = ParseHotkey(L"Ctrl+Alt+H");
+    CHECK(explicitCombo.vk == 'H' && explicitCombo.ctrl &&
+              explicitCombo.alt && !explicitCombo.shift && !explicitCombo.win,
+          "hotkey Ctrl+Alt+H");
+    Hotkey winShift = ParseHotkey(L" win + shift + f4 ");
+    CHECK(winShift.vk == VK_F4 && winShift.win && winShift.shift &&
+              !winShift.ctrl && !winShift.alt,
+          "hotkey 'win + shift + f4' (spacing and case)");
+    Hotkey supers = ParseHotkey(L"Super+Control+Space");
+    CHECK(supers.vk == VK_SPACE && supers.win && supers.ctrl,
+          "hotkey Super/Control aliases");
+    CHECK(ParseHotkey(L"none").vk == 0, "hotkey 'none' disables");
+    CHECK(ParseHotkey(L"OFF").vk == 0, "hotkey 'off' disables");
+    CHECK(ParseHotkey(L"H").vk == 'H' && !ParseHotkey(L"H").ctrl,
+          "hotkey with no modifiers");
+    CHECK(ParseHotkey(L"Ctrl+").vk == 0 && ParseHotkey(L"Ctrl+").ctrl,
+          "hotkey with a trailing + and no key");
+    CHECK(ParseHotkey(L"Ctrl+Alt+nonsense").vk == 0,
+          "hotkey with an unknown key name");
+
     CHECK(ParseMenuBarMode(L"hide") == MenuBarMode::Hide, "menu mode hide");
     CHECK(ParseMenuBarMode(L"keepMenu") == MenuBarMode::KeepMenu,
           "menu mode keepMenu");
