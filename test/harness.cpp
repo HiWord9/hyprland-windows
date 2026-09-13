@@ -286,13 +286,13 @@ static void TestParsers() {
     CHECK(ParseMenuBarMode(L"") == MenuBarMode::Hide, "menu mode default");
 
     RECT rc{100, 100, 300, 300};
-    CHECK(ResizeEdgeForPoint(rc, {120, 120}) == WMSZ_TOPLEFT, "edge top-left");
-    CHECK(ResizeEdgeForPoint(rc, {280, 120}) == WMSZ_TOPRIGHT,
-          "edge top-right");
-    CHECK(ResizeEdgeForPoint(rc, {120, 280}) == WMSZ_BOTTOMLEFT,
-          "edge bottom-left");
-    CHECK(ResizeEdgeForPoint(rc, {280, 280}) == WMSZ_BOTTOMRIGHT,
-          "edge bottom-right");
+    CHECK(ResizeCornerForPoint(rc, {120, 120}) == HTTOPLEFT, "corner top-left");
+    CHECK(ResizeCornerForPoint(rc, {280, 120}) == HTTOPRIGHT,
+          "corner top-right");
+    CHECK(ResizeCornerForPoint(rc, {120, 280}) == HTBOTTOMLEFT,
+          "corner bottom-left");
+    CHECK(ResizeCornerForPoint(rc, {280, 280}) == HTBOTTOMRIGHT,
+          "corner bottom-right");
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -523,7 +523,7 @@ static void MoveCursorGradually(POINT from, POINT to, int steps) {
 // drags the mouse and releases the button. With cancel=true, Esc is pressed
 // before the button is released.
 static void DragWith(bool right, HWND hwnd, POINT start, POINT delta,
-                     void (*entry)(HWND, HWND, POINT), bool cancel = false) {
+                     void (*entry)(HWND, POINT), bool cancel = false) {
     SetCursorPos(start.x, start.y);
     Sleep(50);
     SendMouse(right ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN);
@@ -553,7 +553,7 @@ static void DragWith(bool right, HWND hwnd, POINT start, POINT delta,
     int enter0 = g_sizeMoveEnter, exit0 = g_sizeMoveExit;
     g_mouseMovesSeen = 0;
     DWORD t0 = GetTickCount();
-    entry(hwnd, hwnd, start);
+    entry(hwnd, start);
     DWORD elapsed = GetTickCount() - t0;
     mover.join();
     printf("  modal loop ran for %lu ms\n", (unsigned long)elapsed);
@@ -660,34 +660,29 @@ static void TestMoveResize() {
     GetWindowRect(hwnd, &r6);
     CHECK(EqualRect(&r6, &r5), "Esc restored the original size");
 
-    // Button-up bookkeeping: the loop consumed the release, nothing left.
+    // Button-up bookkeeping: after complete drags nothing is pending. (The
+    // real swallow flag is set by HandleModifierButtonDown; the mechanism it
+    // relies on is exercised directly below.)
     CHECK(!g_swallowButtonUp[0] && !g_swallowButtonUp[1],
           "no orphaned button-up flagged after complete drags");
-    // A drag that can't start (fixed-size window resize) leaves the button
-    // down, so its release must be swallowed later.
+
+    // A no-op resize (fixed-size window) returns immediately without hanging.
     LONG_PTR st = GetWindowLongPtrW(hwnd, GWL_STYLE);
     SetWindowLongPtrW(hwnd, GWL_STYLE, st & ~WS_THICKFRAME);
-    SetCursorPos(c.x, c.y);
-    Sleep(50);
-    SendMouse(MOUSEEVENTF_RIGHTDOWN);
-    Sleep(50);
-    MSG rd;
-    CHECK(PeekMessageW(&rd, nullptr, WM_RBUTTONDOWN, WM_RBUTTONDOWN, PM_REMOVE),
-          "button-down message retrieved (no-op case)");
-    StartResize(hwnd, hwnd, c);
-    g_swallowButtonUp[1] = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
-    CHECK(g_swallowButtonUp[1], "no-op resize flags the pending button-up");
-    SendMouse(MOUSEEVENTF_RIGHTUP);
-    Sleep(50);
-    MSG ru;
-    if (PeekMessageW(&ru, nullptr, WM_RBUTTONUP, WM_RBUTTONUP, PM_REMOVE)) {
-        ProcessRetrievedMessage(&ru);
-        CHECK(ru.message == WM_NULL, "orphaned button-up swallowed");
-    } else {
-        CHECK(false, "button-up message retrieved");
-    }
-    CHECK(!g_swallowButtonUp[1], "swallow flag cleared");
+    DWORD t = GetTickCount();
+    StartResize(hwnd, c);
+    CHECK(GetTickCount() - t < 500, "no-op resize returns immediately");
     SetWindowLongPtrW(hwnd, GWL_STYLE, st);
+
+    // A pending (consumed) right button-up is swallowed exactly once.
+    g_swallowButtonUp[1] = true;
+    MSG ru{hwnd, WM_RBUTTONUP, 0, 0, 0, c};
+    ProcessRetrievedMessage(&ru);
+    CHECK(ru.message == WM_NULL, "flagged button-up swallowed");
+    CHECK(!g_swallowButtonUp[1], "swallow flag cleared");
+    MSG ru2{hwnd, WM_RBUTTONUP, 0, 0, 0, c};
+    ProcessRetrievedMessage(&ru2);
+    CHECK(ru2.message == WM_RBUTTONUP, "next button-up passes through");
 
     // Modifier gate: without the modifier held, clicks pass through.
     MSG click{hwnd, WM_LBUTTONDOWN, 0, 0, 0, center};

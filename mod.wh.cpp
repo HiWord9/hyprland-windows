@@ -860,175 +860,65 @@ int PhysicalButtonVk(bool right) {
     return (right != swapped) ? VK_RBUTTON : VK_LBUTTON;
 }
 
-struct DragSession {
-    HWND root;        // window being moved/resized
-    HWND capture;     // window (on this thread) that receives the mouse input
-    POINT anchor;     // cursor position when the drag started
-    RECT original;    // window rect when the drag started
-    UINT edge;        // 0 = move, otherwise WMSZ_* corner to resize from
-    UINT buttonUp;    // WM_LBUTTONUP / WM_RBUTTONUP that ends the drag
-    UINT ncButtonUp;  // WM_NCLBUTTONUP / WM_NCRBUTTONUP
-    int buttonVk;     // physical button to watch (VK_LBUTTON / VK_RBUTTON)
+// Injected mouse input carries kInjectedMarker in dwExtraInfo so the mod can
+// tell its own synthetic clicks apart from the user's.
+void InjectMouseButton(DWORD flags) {
+    INPUT input{};
+    input.type = INPUT_MOUSE;
+    input.mi.dwFlags = flags;
+    input.mi.dwExtraInfo = kInjectedMarker;
+    SendInput(1, &input, sizeof(input));
+}
+
+// Removes the mod's own left-button messages from this thread's queue without
+// dispatching them, so the app never sees a stray click. During a resize the
+// mod is the only source of left-button input (the user holds the right
+// button), so any left-button message here is ours. Uses the un-hooked
+// PeekMessage so the message hook doesn't re-enter.
+void DrainInjectedLeftButton() {
+    PeekMessageW_t peek =
+        PeekMessageW_Original ? PeekMessageW_Original : PeekMessageW;
+    MSG msg;
+    for (UINT m : {WM_LBUTTONDOWN, WM_LBUTTONUP, WM_LBUTTONDBLCLK,
+                   WM_NCLBUTTONDOWN, WM_NCLBUTTONUP}) {
+        while (peek(&msg, nullptr, m, m, PM_REMOVE)) {
+            // swallow
+        }
+    }
+}
+
+// Nearest corner to the cursor, as an HT* hit-test code (Hyprland resizes from
+// the nearest corner).
+UINT ResizeCornerForPoint(const RECT& rc, POINT pt) {
+    bool left = pt.x < (rc.left + rc.right) / 2;
+    bool top = pt.y < (rc.top + rc.bottom) / 2;
+    if (top) {
+        return left ? HTTOPLEFT : HTTOPRIGHT;
+    }
+    return left ? HTBOTTOMLEFT : HTBOTTOMRIGHT;
+}
+
+// Runs on a worker thread: once the user releases the physical (right) mouse
+// button, release the mod's synthetic left button, which ends the native
+// resize loop. `stop` lets the main thread cancel the wait (e.g. the loop
+// ended via Esc while the right button was still down).
+struct ResizeWatch {
+    int rightVk;
+    std::atomic<bool> stop;
 };
 
-LPCWSTR CursorForEdge(UINT edge) {
-    switch (edge) {
-        case WMSZ_TOPLEFT:
-        case WMSZ_BOTTOMRIGHT:
-            return IDC_SIZENWSE;
-        case WMSZ_TOPRIGHT:
-        case WMSZ_BOTTOMLEFT:
-            return IDC_SIZENESW;
-        default:
-            return IDC_SIZEALL;
+DWORD WINAPI ResizeWatchThread(LPVOID param) {
+    auto* watch = reinterpret_cast<ResizeWatch*>(param);
+    while (!watch->stop && (GetAsyncKeyState(watch->rightVk) & 0x8000)) {
+        Sleep(8);
     }
+    if (!watch->stop) {
+        InjectMouseButton(MOUSEEVENTF_LEFTUP);
+    }
+    return 0;
 }
 
-RECT DragRectForPoint(const DragSession& s, POINT pt, const MINMAXINFO& mmi) {
-    RECT rc = s.original;
-    int dx = pt.x - s.anchor.x;
-    int dy = pt.y - s.anchor.y;
-    if (!s.edge) {
-        OffsetRect(&rc, dx, dy);
-        return rc;
-    }
-
-    bool left = s.edge == WMSZ_LEFT || s.edge == WMSZ_TOPLEFT ||
-                s.edge == WMSZ_BOTTOMLEFT;
-    bool right = s.edge == WMSZ_RIGHT || s.edge == WMSZ_TOPRIGHT ||
-                 s.edge == WMSZ_BOTTOMRIGHT;
-    bool top = s.edge == WMSZ_TOP || s.edge == WMSZ_TOPLEFT ||
-               s.edge == WMSZ_TOPRIGHT;
-    bool bottom = s.edge == WMSZ_BOTTOM || s.edge == WMSZ_BOTTOMLEFT ||
-                  s.edge == WMSZ_BOTTOMRIGHT;
-    if (left) rc.left += dx;
-    if (right) rc.right += dx;
-    if (top) rc.top += dy;
-    if (bottom) rc.bottom += dy;
-
-    LONG minW = std::max(1L, mmi.ptMinTrackSize.x);
-    LONG minH = std::max(1L, mmi.ptMinTrackSize.y);
-    LONG maxW = std::max(minW, mmi.ptMaxTrackSize.x);
-    LONG maxH = std::max(minH, mmi.ptMaxTrackSize.y);
-    LONG w = std::clamp(rc.right - rc.left, minW, maxW);
-    LONG h = std::clamp(rc.bottom - rc.top, minH, maxH);
-    if (left) rc.left = rc.right - w; else rc.right = rc.left + w;
-    if (top) rc.top = rc.bottom - h; else rc.bottom = rc.top + h;
-    return rc;
-}
-
-// Modal move/resize loop, like the system's own one behind a caption drag but
-// driven by whichever mouse button started it (the system loop only ends on
-// the left button) and independent of the thread that owns the root window.
-void RunDragLoop(DragSession& s) {
-    UINT dpi = WindowDpi(s.root);
-    MINMAXINFO mmi{};
-    mmi.ptMinTrackSize = {GetSystemMetricsForDpi(SM_CXMINTRACK, dpi),
-                          GetSystemMetricsForDpi(SM_CYMINTRACK, dpi)};
-    mmi.ptMaxTrackSize = {GetSystemMetricsForDpi(SM_CXMAXTRACK, dpi),
-                          GetSystemMetricsForDpi(SM_CYMAXTRACK, dpi)};
-    SendMessageW(s.root, WM_GETMINMAXINFO, 0, (LPARAM)&mmi);
-
-    HCURSOR cursor = LoadCursorW(nullptr, CursorForEdge(s.edge));
-    // Bypass our own hook while pumping here.
-    PeekMessageW_t peekMessage =
-        PeekMessageW_Original ? PeekMessageW_Original : PeekMessageW;
-
-    SendMessageW(s.root, WM_ENTERSIZEMOVE, 0, 0);
-    SetCapture(s.capture);
-    SetCursor(cursor);
-
-    RECT current = s.original;
-    bool cancelled = false;
-    bool done = false;
-    while (!done && GetCapture() == s.capture) {
-        MSG msg;
-        while (!done && peekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            if (msg.message == WM_QUIT) {
-                PostQuitMessage((int)msg.wParam);
-                done = true;
-                break;
-            }
-            if (msg.message == s.buttonUp || msg.message == s.ncButtonUp) {
-                done = true;
-                break;
-            }
-
-            switch (msg.message) {
-                case WM_MOUSEMOVE:
-                case WM_NCMOUSEMOVE: {
-                    RECT rc = DragRectForPoint(s, msg.pt, mmi);
-                    if (!EqualRect(&rc, &current)) {
-                        if (s.edge) {
-                            SendMessageW(s.root, WM_SIZING, s.edge,
-                                         (LPARAM)&rc);
-                        } else {
-                            SendMessageW(s.root, WM_MOVING, 0, (LPARAM)&rc);
-                        }
-                        SetWindowPos(s.root, nullptr, rc.left, rc.top,
-                                     rc.right - rc.left, rc.bottom - rc.top,
-                                     SWP_NOZORDER | SWP_NOACTIVATE |
-                                         (s.edge ? 0 : SWP_NOSIZE));
-                        current = rc;
-                    }
-                    SetCursor(cursor);
-                    continue;
-                }
-
-                case WM_KEYDOWN:
-                case WM_SYSKEYDOWN:
-                    if (msg.wParam == VK_ESCAPE) {
-                        cancelled = true;
-                        done = true;
-                        continue;
-                    }
-                    break;
-
-                // Other mouse buttons pressed mid-drag: not for the app.
-                case WM_LBUTTONDOWN:
-                case WM_LBUTTONDBLCLK:
-                case WM_RBUTTONDOWN:
-                case WM_RBUTTONDBLCLK:
-                case WM_MBUTTONDOWN:
-                case WM_MBUTTONDBLCLK:
-                case WM_XBUTTONDOWN:
-                case WM_XBUTTONDBLCLK:
-                case WM_NCLBUTTONDOWN:
-                case WM_NCRBUTTONDOWN:
-                case WM_NCMBUTTONDOWN:
-                    continue;
-            }
-
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
-        if (done) {
-            break;
-        }
-
-        // The release may never arrive as a message (e.g. the capture went to
-        // a window that isn't in the foreground), so also watch the physical
-        // button state instead of blocking forever.
-        if (!(GetAsyncKeyState(s.buttonVk) & 0x8000)) {
-            break;
-        }
-        MsgWaitForMultipleObjectsEx(0, nullptr, 50, QS_ALLINPUT,
-                                    MWMO_INPUTAVAILABLE);
-    }
-
-    if (GetCapture() == s.capture) {
-        ReleaseCapture();
-    }
-    if (cancelled && !EqualRect(&current, &s.original)) {
-        SetWindowPos(s.root, nullptr, s.original.left, s.original.top,
-                     s.original.right - s.original.left,
-                     s.original.bottom - s.original.top,
-                     SWP_NOZORDER | SWP_NOACTIVATE | (s.edge ? 0 : SWP_NOSIZE));
-    }
-    SendMessageW(s.root, WM_EXITSIZEMOVE, 0, 0);
-}
-
-void StartMove(HWND root, HWND capture, POINT pt) {
+void StartMove(HWND root, POINT pt) {
     if (IsIconic(root)) {
         return;
     }
@@ -1045,17 +935,7 @@ void StartMove(HWND root, HWND capture, POINT pt) {
     }
 }
 
-// Hyprland resizes from the corner nearest to the cursor.
-UINT ResizeEdgeForPoint(const RECT& rc, POINT pt) {
-    bool left = pt.x < (rc.left + rc.right) / 2;
-    bool top = pt.y < (rc.top + rc.bottom) / 2;
-    if (top) {
-        return left ? WMSZ_TOPLEFT : WMSZ_TOPRIGHT;
-    }
-    return left ? WMSZ_BOTTOMLEFT : WMSZ_BOTTOMRIGHT;
-}
-
-void StartResize(HWND root, HWND capture, POINT pt) {
+void StartResize(HWND root, POINT pt) {
     if (IsIconic(root) || IsZoomed(root)) {
         return;
     }
@@ -1063,14 +943,43 @@ void StartResize(HWND root, HWND capture, POINT pt) {
         return;  // fixed-size window
     }
 
-    DragSession s{root, capture,       pt,
-                  {},   0,             WM_RBUTTONUP,
-                  WM_NCRBUTTONUP,      PhysicalButtonVk(true)};
-    if (!GetWindowRect(root, &s.original)) {
+    RECT rc;
+    if (!GetWindowRect(root, &rc)) {
         return;
     }
-    s.edge = ResizeEdgeForPoint(s.original, pt);
-    RunDragLoop(s);
+    UINT htCorner = ResizeCornerForPoint(rc, pt);
+
+    // The system's border-resize loop only tracks the cursor while the left
+    // mouse button is down, so hold a synthetic one (its click swallowed so
+    // the app never sees it) and release it when the user lets go of the
+    // physical right button. Entering with the cursor away from the corner
+    // keeps the grab offset, so the resize is relative - like Hyprland - and
+    // because this is the real resize path, GPU-composited windows (Chrome,
+    // Electron) reflow live and native menu bars don't flicker.
+    InjectMouseButton(MOUSEEVENTF_LEFTDOWN);
+    for (int i = 0; i < 100 && !(GetAsyncKeyState(VK_LBUTTON) & 0x8000); i++) {
+        DrainInjectedLeftButton();
+        Sleep(2);
+    }
+    DrainInjectedLeftButton();
+
+    ResizeWatch watch{PhysicalButtonVk(true), false};
+    HANDLE thread =
+        CreateThread(nullptr, 0, ResizeWatchThread, &watch, 0, nullptr);
+
+    DefWindowProcW(root, WM_NCLBUTTONDOWN, htCorner, MAKELPARAM(pt.x, pt.y));
+
+    watch.stop = true;
+    if (thread) {
+        WaitForSingleObject(thread, 2000);
+        CloseHandle(thread);
+    }
+    // Make sure the synthetic left button is released (e.g. if the loop ended
+    // via Esc before the watcher fired), then swallow its messages.
+    if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) {
+        InjectMouseButton(MOUSEEVENTF_LEFTUP);
+    }
+    DrainInjectedLeftButton();
 }
 
 // Per-thread: a button-up to swallow because we swallowed its button-down.
@@ -1092,22 +1001,17 @@ bool HandleModifierButtonDown(const MSG* msg, bool right) {
     Wh_Log(L"%s %p", right ? L"Resize" : L"Move", root);
     ArmWinMask();
 
-    // Mouse capture must go to a window of this thread; the clicked window
-    // always is, the root usually.
-    HWND capture =
-        GetWindowThreadProcessId(root, nullptr) == GetCurrentThreadId()
-            ? root
-            : msg->hwnd;
     if (right) {
-        StartResize(root, capture, msg->pt);
+        // We consumed the right button-down, so swallow its matching up too:
+        // the native resize loop ends on the mod's synthetic left-up, not the
+        // physical right-up, which would otherwise reach the app.
+        g_swallowButtonUp[1] = true;
+        StartResize(root, msg->pt);
     } else {
-        StartMove(root, capture, msg->pt);
+        // The native move loop consumes the physical left-up itself, so there
+        // is nothing left to swallow.
+        StartMove(root, msg->pt);
     }
-
-    // If the move/size loop consumed the button release, nothing is left to
-    // swallow; otherwise make sure the app doesn't see an orphaned button-up.
-    g_swallowButtonUp[right] =
-        (GetAsyncKeyState(PhysicalButtonVk(right)) & 0x8000) != 0;
     return true;
 }
 
@@ -1125,6 +1029,13 @@ bool HandleButtonUp(bool right) {
 // Called for every message an application removes from its queue. Returns
 // with the message replaced by WM_NULL if it was consumed by the mod.
 void ProcessRetrievedMessage(MSG* msg) {
+    // Never act on the mod's own injected input (used to drive the resize
+    // loop), and never turn it into WM_NULL - the native loop needs to see its
+    // synthetic left-button-up to end.
+    if ((ULONG_PTR)GetMessageExtraInfo() == kInjectedMarker) {
+        return;
+    }
+
     bool consumed = false;
 
     switch (msg->message) {
