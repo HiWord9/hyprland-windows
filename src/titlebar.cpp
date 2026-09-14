@@ -162,6 +162,17 @@ void RestoreFrame(HWND hwnd) {
 }
 
 void HandleFramelessRequest(HWND hwnd, WPARAM action) {
+    if (action == kActionAutoHide) {
+        // Re-check now that the window is done being created. A window that
+        // never becomes visible is left alone: toolkits create throwaway
+        // top-level windows during start-up (to probe for a pixel format, for
+        // instance) and touching those can break the app's initialization.
+        if (!IsWindowVisible(hwnd) || !IsAutoHideCandidate(hwnd)) {
+            return;
+        }
+        action = kActionHide;
+    }
+
     bool frameless = IsFrameless(hwnd);
     if (action == kActionToggle) {
         action = frameless ? kActionShow : kActionHide;
@@ -188,7 +199,7 @@ BOOL CALLBACK AutoHideEnumProc(HWND hwnd, LPARAM lParam) {
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
     if (pid == (DWORD)lParam && IsAutoHideCandidate(hwnd)) {
-        RequestFrameless(hwnd, kActionHide);
+        RequestFrameless(hwnd, kActionAutoHide);
     }
     return TRUE;
 }

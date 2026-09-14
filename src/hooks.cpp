@@ -120,9 +120,15 @@ void OnWindowCreated(HWND hwnd, DWORD dwStyle) {
         return;
     }
     if (IsAutoHideCandidate(hwnd)) {
-        // We're on the creating thread, and the window isn't visible yet, so
-        // do it right away instead of posting: no title bar flicker.
-        MakeFrameless(hwnd);
+        // Post instead of hiding right here. We are still inside the app's
+        // CreateWindowEx call: the window exists but the code that owns it has
+        // not run yet, and changing the frame at that point delivers a resize
+        // into a half-initialized window. Some apps don't survive that - they
+        // fail to start at all. Posting means the work happens once the window
+        // is pumping messages, which is exactly when the hotkey path (which
+        // has always worked) does it. The cost is that the title bar can be
+        // visible for a frame or two first.
+        RequestFrameless(hwnd, kActionAutoHide);
     }
 }
 

@@ -97,10 +97,14 @@ void RestoreDwmAttributes(HWND hwnd);
 // Every request to hide/restore a title bar is posted to the window as
 // `g_msgFrameless` and handled on the window's own thread, which is the only
 // thread that may (un)subclass it.
+// kActionAutoHide is the "hide by default" path. Unlike the explicit actions it
+// is re-checked when it runs, because by then the window may have turned out to
+// be something we should not touch.
 enum FramelessAction : WPARAM {
     kActionToggle = 0,
     kActionHide = 1,
     kActionShow = 2,
+    kActionAutoHide = 3,
 };
 
 extern UINT g_msgFrameless;  // RegisterWindowMessage, set in Wh_ModInit

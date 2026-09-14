@@ -525,6 +525,52 @@ static void TestFramelessGeometry(bool withMenu, MenuBarMode mode) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// "Hide by default"
+
+static void TestAutoHide() {
+    printf("\n== auto-hide (hide by default) ==\n");
+
+    // Auto-hide is deferred until the window pumps messages and re-checked
+    // when it runs, so a window that never becomes visible - like the
+    // throwaway top-level windows toolkits create while starting up - is left
+    // alone. Hiding those mid-creation stops some apps from starting.
+    HWND hwnd = CreateWindowExW(WS_EX_TOPMOST, L"HyprlandWindowsTestWnd",
+                                L"Hypr auto-hide test", WS_OVERLAPPEDWINDOW,
+                                240, 240, 420, 280, nullptr, nullptr,
+                                GetModuleHandleW(nullptr), nullptr);
+    CHECK(hwnd && !IsWindowVisible(hwnd), "created an invisible window");
+    CHECK(IsAutoHideCandidate(hwnd), "it otherwise qualifies for auto-hide");
+
+    RequestFrameless(hwnd, kActionAutoHide);
+    Pump(300);
+    CHECK(!IsFrameless(hwnd), "auto-hide leaves an invisible window alone");
+
+    ShowWindow(hwnd, SW_SHOW);
+    Pump(200);
+    RequestFrameless(hwnd, kActionAutoHide);
+    Pump(300);
+    CHECK(IsFrameless(hwnd), "auto-hide takes the window once it is shown");
+    RECT win, cli = ClientRectOnScreen(hwnd);
+    GetWindowRect(hwnd, &win);
+    CHECK(cli.top == win.top, "and removes the whole title bar");
+
+    // An explicit request - what the hotkey sends - is not filtered that way.
+    RequestFrameless(hwnd, kActionShow);
+    Pump(300);
+    CHECK(!IsFrameless(hwnd), "explicit show restores it");
+    ShowWindow(hwnd, SW_HIDE);
+    Pump(100);
+    RequestFrameless(hwnd, kActionHide);
+    Pump(300);
+    CHECK(IsFrameless(hwnd), "an explicit hide still works while hidden");
+
+    RequestFrameless(hwnd, kActionShow);
+    Pump(200);
+    DestroyWindow(hwnd);
+    Pump(100);
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Move / resize loop tests (inject mouse input)
 
 static void SendMouse(DWORD flags, DWORD data = 0) {
@@ -753,6 +799,7 @@ int main(int argc, char** argv) {
     TestFramelessGeometry(false, MenuBarMode::Hide);
     TestFramelessGeometry(true, MenuBarMode::Hide);
     TestFramelessGeometry(true, MenuBarMode::KeepMenu);
+    TestAutoHide();
     if (!noInput) {
         TestMoveResize();
     }
