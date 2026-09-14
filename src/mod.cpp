@@ -12,14 +12,8 @@ BOOL Wh_ModInit() {
 
     LoadSettings();
 
-    WindhawkUtils::SetFunctionHook(GetMessageW, GetMessageW_Hook,
-                                   &GetMessageW_Original);
-    WindhawkUtils::SetFunctionHook(GetMessageA, GetMessageA_Hook,
-                                   &GetMessageA_Original);
-    WindhawkUtils::SetFunctionHook(PeekMessageW, PeekMessageW_Hook,
-                                   &PeekMessageW_Original);
-    WindhawkUtils::SetFunctionHook(PeekMessageA, PeekMessageA_Hook,
-                                   &PeekMessageA_Original);
+    // Only short, non-blocking functions are hooked. Message interception is a
+    // WH_GETMESSAGE hook instead, installed per thread below.
     WindhawkUtils::SetFunctionHook(CreateWindowExW, CreateWindowExW_Hook,
                                    &CreateWindowExW_Original);
     WindhawkUtils::SetFunctionHook(CreateWindowExA, CreateWindowExA_Hook,
@@ -29,6 +23,7 @@ BOOL Wh_ModInit() {
 }
 
 void Wh_ModAfterInit() {
+    InstallMessageHooks();
     if (g_settings.hideByDefault) {
         AutoHideExistingWindows();
     }
@@ -37,6 +32,8 @@ void Wh_ModAfterInit() {
 void Wh_ModBeforeUninit() {
     Wh_Log(L"BeforeUninit: restoring title bars");
 
+    // Take our hook procedures out before the DLL goes away.
+    RemoveMessageHooks();
     ShutdownWinMask();
 
     // Restore synchronously on each window's thread so that no subclass

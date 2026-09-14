@@ -525,6 +525,67 @@ static void TestFramelessGeometry(bool withMenu, MenuBarMode mode) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// The WH_GETMESSAGE interception hook
+
+// Pumps without calling ProcessRetrievedMessage, so only the mod's own hook
+// can act on the messages.
+static void PumpRaw(DWORD ms) {
+    DWORD end = GetTickCount() + ms;
+    for (;;) {
+        MSG msg;
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        int left = (int)(end - GetTickCount());
+        if (left <= 0) {
+            break;
+        }
+        MsgWaitForMultipleObjects(0, nullptr, FALSE, left, QS_ALLINPUT);
+    }
+}
+
+static void TestMessageHook() {
+    printf("\n== WH_GETMESSAGE interception ==\n");
+
+    // Messages are intercepted by a hook procedure instead of by hooking the
+    // blocking GetMessage, so check the hook really is what does the work:
+    // everything here is pumped without calling ProcessRetrievedMessage.
+    HWND hwnd = CreateTestWindow(L"Hypr message hook test", false, 300, 300);
+    PumpRaw(200);
+
+    g_settings.hotkeyVk = 'H';
+    g_settings.hotkeyCtrl = false;
+    g_settings.hotkeyAlt = false;
+    g_settings.hotkeyShift = false;
+    g_settings.hotkeyWin = false;
+
+    PostMessageW(hwnd, WM_KEYDOWN, 'H', 1);
+    PumpRaw(300);
+    CHECK(!IsFrameless(hwnd), "nothing happens before the hook is installed");
+
+    InstallMessageHookForThread();
+    PostMessageW(hwnd, WM_KEYDOWN, 'H', 1);
+    PumpRaw(400);
+    CHECK(IsFrameless(hwnd), "the hook picked the hotkey up and hid the bar");
+
+    RemoveMessageHooks();
+    PostMessageW(hwnd, WM_KEYDOWN, 'H', 1);
+    PumpRaw(300);
+    CHECK(IsFrameless(hwnd), "after removal the hotkey is ignored again");
+
+    // Removing the hooks must not leave the thread unable to get them back.
+    InstallMessageHookForThread();
+    PostMessageW(hwnd, WM_KEYDOWN, 'H', 1);
+    PumpRaw(400);
+    CHECK(!IsFrameless(hwnd), "the hook can be installed again afterwards");
+
+    RemoveMessageHooks();
+    DestroyWindow(hwnd);
+    Pump(100);
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // "Hide by default"
 
 static void TestAutoHide() {
@@ -799,6 +860,7 @@ int main(int argc, char** argv) {
     TestFramelessGeometry(false, MenuBarMode::Hide);
     TestFramelessGeometry(true, MenuBarMode::Hide);
     TestFramelessGeometry(true, MenuBarMode::KeepMenu);
+    TestMessageHook();
     TestAutoHide();
     if (!noInput) {
         TestMoveResize();

@@ -27,15 +27,12 @@ void InjectMouseButton(DWORD flags) {
 // Removes the mod's own left-button messages from this thread's queue without
 // dispatching them, so the app never sees a stray click. During a resize the
 // mod is the only source of left-button input (the user holds the right
-// button), so any left-button message here is ours. Uses the un-hooked
-// PeekMessage so the message hook doesn't re-enter.
+// button), so any left-button message here is ours.
 void DrainInjectedLeftButton() {
-    PeekMessageW_t peek =
-        PeekMessageW_Original ? PeekMessageW_Original : PeekMessageW;
     MSG msg;
     for (UINT m : {WM_LBUTTONDOWN, WM_LBUTTONUP, WM_LBUTTONDBLCLK,
                    WM_NCLBUTTONDOWN, WM_NCLBUTTONUP}) {
-        while (peek(&msg, nullptr, m, m, PM_REMOVE)) {
+        while (PeekMessageW(&msg, nullptr, m, m, PM_REMOVE)) {
             // swallow
         }
     }
@@ -139,8 +136,12 @@ void StartResize(HWND root, POINT pt) {
 // Per-thread: a button-up to swallow because we swallowed its button-down.
 thread_local bool g_swallowButtonUp[2];  // [0] = left, [1] = right
 
+// A move or resize runs a modal loop that pumps messages, so button presses
+// arriving during one reach this function again. One drag per thread is plenty.
+thread_local bool g_dragActive;
+
 bool HandleModifierButtonDown(const MSG* msg, bool right) {
-    if (!IsDragModifierDown()) {
+    if (g_dragActive || !IsDragModifierDown()) {
         return false;
     }
 
@@ -155,6 +156,7 @@ bool HandleModifierButtonDown(const MSG* msg, bool right) {
     Wh_Log(L"%s %p", right ? L"Resize" : L"Move", root);
     ArmWinMask();
 
+    g_dragActive = true;
     if (right) {
         // We consumed the right button-down, so swallow its matching up too:
         // the native resize loop ends on the mod's synthetic left-up, not the
@@ -166,6 +168,7 @@ bool HandleModifierButtonDown(const MSG* msg, bool right) {
         // is nothing left to swallow.
         StartMove(root, msg->pt);
     }
+    g_dragActive = false;
     return true;
 }
 

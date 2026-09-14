@@ -1,8 +1,17 @@
-// The hooked APIs: every message an app retrieves passes through here,
-// as does every window it creates.
+// Every message an app retrieves passes through here, as does every window it
+// creates.
+//
+// Messages are intercepted with a WH_GETMESSAGE hook rather than by hooking
+// GetMessage. Hooking GetMessage looks simpler, but GetMessage *blocks*: an
+// idle thread parks inside the hook function, leaving a frame that belongs to
+// this mod on its stack for as long as the app has nothing to do. Windhawk
+// then cannot unload the mod without those threads eventually returning into
+// freed memory, which crashed every process with a message loop (shell
+// included) on every disable. A hook procedure only runs for the moment the
+// message is handed over, so nothing of ours stays on the stack.
 #include "common.h"
 
-PeekMessageW_t PeekMessageW_Original;
+#include <tlhelp32.h>
 
 // Called for every message an application removes from its queue. Returns
 // with the message replaced by WM_NULL if it was consumed by the mod.
@@ -61,62 +70,81 @@ void ProcessRetrievedMessage(MSG* msg) {
     }
 }
 
-GetMessageW_t GetMessageW_Original;
-BOOL WINAPI GetMessageW_Hook(LPMSG lpMsg,
-                             HWND hWnd,
-                             UINT wMsgFilterMin,
-                             UINT wMsgFilterMax) {
-    BOOL ret = GetMessageW_Original(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax);
-    if (ret > 0) {
-        ProcessRetrievedMessage(lpMsg);
+////////////////////////////////////////////////////////////////////////////////
+// The message hook, one per message-pumping thread of this process
+
+std::mutex g_messageHooksMutex;
+std::unordered_map<DWORD, HHOOK> g_messageHooks;  // thread id -> its hook
+
+LRESULT CALLBACK GetMessageProc(int code, WPARAM wParam, LPARAM lParam) {
+    // PM_NOREMOVE means the app is only looking at the message; it stays in the
+    // queue and we must not consume it.
+    if (code == HC_ACTION && wParam == PM_REMOVE) {
+        ProcessRetrievedMessage(reinterpret_cast<MSG*>(lParam));
     }
-    return ret;
+    return CallNextHookEx(nullptr, code, wParam, lParam);
 }
 
-GetMessageA_t GetMessageA_Original;
-BOOL WINAPI GetMessageA_Hook(LPMSG lpMsg,
-                             HWND hWnd,
-                             UINT wMsgFilterMin,
-                             UINT wMsgFilterMax) {
-    BOOL ret = GetMessageA_Original(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax);
-    if (ret > 0) {
-        ProcessRetrievedMessage(lpMsg);
+void InstallMessageHookForThread() {
+    DWORD threadId = GetCurrentThreadId();
+    std::lock_guard<std::mutex> lock(g_messageHooksMutex);
+    if (g_messageHooks.count(threadId)) {
+        return;
     }
-    return ret;
+    HHOOK hook = SetWindowsHookExW(WH_GETMESSAGE, GetMessageProc,
+                                   ModuleInstance(), threadId);
+    if (hook) {
+        g_messageHooks[threadId] = hook;
+    } else {
+        Wh_Log(L"WH_GETMESSAGE hook failed for thread %u (%u)", threadId,
+               GetLastError());
+    }
 }
 
-BOOL WINAPI PeekMessageW_Hook(LPMSG lpMsg,
-                              HWND hWnd,
-                              UINT wMsgFilterMin,
-                              UINT wMsgFilterMax,
-                              UINT wRemoveMsg) {
-    BOOL ret = PeekMessageW_Original(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax,
-                                     wRemoveMsg);
-    if (ret && (wRemoveMsg & PM_REMOVE)) {
-        ProcessRetrievedMessage(lpMsg);
+// Covers the threads that already had windows when the mod was loaded; threads
+// that come later are caught when they create their first window.
+BOOL CALLBACK InstallHookEnumProc(HWND hwnd, LPARAM lParam) {
+    DWORD pid = 0;
+    DWORD threadId = GetWindowThreadProcessId(hwnd, &pid);
+    if (pid != (DWORD)lParam || !threadId) {
+        return TRUE;
     }
-    return ret;
+
+    std::lock_guard<std::mutex> lock(g_messageHooksMutex);
+    if (!g_messageHooks.count(threadId)) {
+        HHOOK hook = SetWindowsHookExW(WH_GETMESSAGE, GetMessageProc,
+                                       ModuleInstance(), threadId);
+        if (hook) {
+            g_messageHooks[threadId] = hook;
+        }
+    }
+    return TRUE;
 }
 
-PeekMessageA_t PeekMessageA_Original;
-BOOL WINAPI PeekMessageA_Hook(LPMSG lpMsg,
-                              HWND hWnd,
-                              UINT wMsgFilterMin,
-                              UINT wMsgFilterMax,
-                              UINT wRemoveMsg) {
-    BOOL ret = PeekMessageA_Original(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax,
-                                     wRemoveMsg);
-    if (ret && (wRemoveMsg & PM_REMOVE)) {
-        ProcessRetrievedMessage(lpMsg);
+void InstallMessageHooks() {
+    EnumWindows(InstallHookEnumProc, (LPARAM)GetCurrentProcessId());
+}
+
+void RemoveMessageHooks() {
+    std::lock_guard<std::mutex> lock(g_messageHooksMutex);
+    for (const auto& [threadId, hook] : g_messageHooks) {
+        UnhookWindowsHookEx(hook);
     }
-    return ret;
+    g_messageHooks.clear();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Window creation hooks ("hide by default")
 
 void OnWindowCreated(HWND hwnd, DWORD dwStyle) {
-    if (!hwnd || (dwStyle & WS_CHILD) || !g_settings.hideByDefault) {
+    if (!hwnd) {
+        return;
+    }
+    // A thread that creates a window is a thread that will pump messages, so
+    // this is where threads born after the mod loaded get their hook.
+    InstallMessageHookForThread();
+
+    if ((dwStyle & WS_CHILD) || !g_settings.hideByDefault) {
         return;
     }
     if (IsAutoHideCandidate(hwnd)) {

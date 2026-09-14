@@ -135,6 +135,7 @@ bool HandleHotkey(const MSG* msg);
 constexpr WORD kMaskVk = 0xE8;  // unassigned VK, only used as "a key was hit"
 constexpr ULONG_PTR kInjectedMarker = 0x48797072;  // 'Hypr'
 
+HINSTANCE ModuleInstance();
 void ArmWinMask();
 void ShutdownWinMask();
 
@@ -157,38 +158,18 @@ bool HandleButtonUp(bool right);
 void ProcessRetrievedMessage(MSG* msg);
 void OnWindowCreated(HWND hwnd, DWORD dwStyle);
 
-using GetMessageW_t = decltype(&GetMessageW);
-using GetMessageA_t = decltype(&GetMessageA);
-using PeekMessageW_t = decltype(&PeekMessageW);
-using PeekMessageA_t = decltype(&PeekMessageA);
+// Message interception lives in a WH_GETMESSAGE hook, one per pumping thread -
+// see the comment at the top of hooks.cpp for why it is not an API hook.
+void InstallMessageHookForThread();
+void InstallMessageHooks();
+void RemoveMessageHooks();
+
 using CreateWindowExW_t = decltype(&CreateWindowExW);
 using CreateWindowExA_t = decltype(&CreateWindowExA);
 
-extern GetMessageW_t GetMessageW_Original;
-extern GetMessageA_t GetMessageA_Original;
-extern PeekMessageW_t PeekMessageW_Original;
-extern PeekMessageA_t PeekMessageA_Original;
 extern CreateWindowExW_t CreateWindowExW_Original;
 extern CreateWindowExA_t CreateWindowExA_Original;
 
-BOOL WINAPI GetMessageW_Hook(LPMSG lpMsg,
-                             HWND hWnd,
-                             UINT wMsgFilterMin,
-                             UINT wMsgFilterMax);
-BOOL WINAPI GetMessageA_Hook(LPMSG lpMsg,
-                             HWND hWnd,
-                             UINT wMsgFilterMin,
-                             UINT wMsgFilterMax);
-BOOL WINAPI PeekMessageW_Hook(LPMSG lpMsg,
-                              HWND hWnd,
-                              UINT wMsgFilterMin,
-                              UINT wMsgFilterMax,
-                              UINT wRemoveMsg);
-BOOL WINAPI PeekMessageA_Hook(LPMSG lpMsg,
-                              HWND hWnd,
-                              UINT wMsgFilterMin,
-                              UINT wMsgFilterMax,
-                              UINT wRemoveMsg);
 HWND WINAPI CreateWindowExW_Hook(DWORD dwExStyle,
                                  LPCWSTR lpClassName,
                                  LPCWSTR lpWindowName,
