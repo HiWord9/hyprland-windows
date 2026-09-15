@@ -327,12 +327,12 @@ static void TestParsers() {
     CHECK(ParseMenuBarMode(L"") == MenuBarMode::Hide, "menu mode default");
 
     RECT rc{100, 100, 300, 300};
-    CHECK(ResizeCornerForPoint(rc, {120, 120}) == HTTOPLEFT, "corner top-left");
-    CHECK(ResizeCornerForPoint(rc, {280, 120}) == HTTOPRIGHT,
+    CHECK(ResizeEdgeForPoint(rc, {120, 120}) == WMSZ_TOPLEFT, "corner top-left");
+    CHECK(ResizeEdgeForPoint(rc, {280, 120}) == WMSZ_TOPRIGHT,
           "corner top-right");
-    CHECK(ResizeCornerForPoint(rc, {120, 280}) == HTBOTTOMLEFT,
+    CHECK(ResizeEdgeForPoint(rc, {120, 280}) == WMSZ_BOTTOMLEFT,
           "corner bottom-left");
-    CHECK(ResizeCornerForPoint(rc, {280, 280}) == HTBOTTOMRIGHT,
+    CHECK(ResizeEdgeForPoint(rc, {280, 280}) == WMSZ_BOTTOMRIGHT,
           "corner bottom-right");
 }
 
@@ -863,7 +863,7 @@ static void TestMoveResize() {
     CHECK(g_sizeMoveEnter == enter0,
           "a resize request for a fixed-size window starts no loop");
     CHECK(!(GetAsyncKeyState(VK_LBUTTON) & 0x8000),
-          "and leaves no synthetic mouse button held");
+          "and holds no mouse button of its own");
     SetWindowLongPtrW(hwnd, GWL_STYLE, st);
 
     // A pending (consumed) right button-up is swallowed exactly once.

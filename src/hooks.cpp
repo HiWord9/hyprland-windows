@@ -26,12 +26,7 @@ void ProcessRetrievedMessage(MSG* msg) {
         case WM_LBUTTONDBLCLK:
         case WM_NCLBUTTONDOWN:
         case WM_NCLBUTTONDBLCLK:
-            // A press arriving while a resize waits for its synthetic button
-            // is that button, and is what the resize loop is started from.
-            // Any other press may ask for a move.
-            consumed = HasPendingResize()
-                           ? !HandleInjectedResizeEntry(msg)
-                           : HandleModifierButtonDown(msg, false);
+            consumed = HandleModifierButtonDown(msg, false);
             break;
 
         case WM_RBUTTONDOWN:
@@ -43,15 +38,7 @@ void ProcessRetrievedMessage(MSG* msg) {
 
         case WM_LBUTTONUP:
         case WM_NCLBUTTONUP:
-            // The mod's synthetic release is what ends a resize loop, so it
-            // has to reach it. Outside a loop - a resize cancelled with Esc -
-            // it is ours to swallow. Only the mod injects left-button input,
-            // so its marker is what tells the two apart.
-            if ((ULONG_PTR)GetMessageExtraInfo() == kInjectedMarker) {
-                consumed = !IsInMoveSizeLoop();
-            } else {
-                consumed = HandleButtonUp(false);
-            }
+            consumed = HandleLeftButtonUp();
             break;
 
         case WM_RBUTTONUP:

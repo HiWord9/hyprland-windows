@@ -159,6 +159,8 @@ bool HandleHotkey(const MSG* msg);
 // Win + mouse: Start-menu suppression and the drags themselves
 
 constexpr WORD kMaskVk = 0xE8;  // unassigned VK, only used as "a key was hit"
+// Marks the keystrokes the mod injects to keep the Start menu shut, so its
+// own low-level hook lets them through.
 constexpr ULONG_PTR kInjectedMarker = 0x48797072;  // 'Hypr'
 
 void ArmWinMask();
@@ -176,21 +178,20 @@ enum DragKind : WPARAM {
 bool IsDragModifierDown();
 bool IsInMoveSizeLoop();
 int PhysicalButtonVk(bool right);
-void InjectMouseButton(DWORD flags);
-UINT ResizeCornerForPoint(const RECT& rc, POINT pt);
+void ForceLeftButtonDown();
+UINT ResizeEdgeForPoint(const RECT& rc, POINT pt);
 void RequestDrag(HWND root, WPARAM kind, POINT pt);
 
-// Both run on the target window's thread and rewrite the message they are
-// given into the one that starts a system move/resize loop. They return false
-// if there is nothing to start, which means the message is to be swallowed.
-bool HandleDragRequest(MSG* msg);
-bool HasPendingResize();
-bool HandleInjectedResizeEntry(MSG* msg);
+// Runs on the target window's thread and rewrites the request into the system
+// command that starts a move or size loop. Returns false if there is nothing
+// to start, which means the message is to be swallowed.
 
 // Per-thread: a button-up to swallow because we swallowed its button-down.
 extern thread_local bool g_swallowButtonUp[2];  // [0] = left, [1] = right
+bool HandleDragRequest(MSG* msg);
 bool HandleModifierButtonDown(const MSG* msg, bool right);
 bool HandleButtonUp(bool right);
+bool HandleLeftButtonUp();
 
 ////////////////////////////////////////////////////////////////////////////////
 // The hooked APIs

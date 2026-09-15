@@ -4,7 +4,7 @@
 // The mod never runs such a loop itself. A drag is requested by posting
 // g_msgDrag to the window that is to be moved or resized, and when that
 // window's own thread retrieves the request, the message is rewritten into the
-// one the system starts the loop from. The loop then runs where a title-bar
+// system command the loop starts from. The loop then runs where a title-bar
 // drag would run it - inside the application's DispatchMessage - instead of
 // inside the mod's message hook, which matters twice:
 //
@@ -14,6 +14,14 @@
 //   * A request survives crossing a thread or a process boundary, which a
 //     WM_SYSCOMMAND posted into another process would not - the UIPI message
 //     filter drops that one.
+//
+// Neither drag touches the global mouse state. The only thing the loops want
+// that a Win + mouse drag cannot give them is the left mouse button: they
+// track the mouse while it is held and end when it is released. Both of those
+// are per-thread rather than global - the button state a loop reads is its own
+// thread's synchronized copy, and the release is just a message - so the mod
+// fakes the first and posts the second, and no other window ever sees a click
+// that wasn't there.
 #include "common.h"
 
 UINT g_msgDrag;  // RegisterWindowMessage, set in Wh_ModInit
@@ -39,25 +47,31 @@ int PhysicalButtonVk(bool right) {
     return (right != swapped) ? VK_RBUTTON : VK_LBUTTON;
 }
 
-// Injected mouse input carries kInjectedMarker in dwExtraInfo so the mod can
-// tell its own synthetic clicks apart from the user's.
-void InjectMouseButton(DWORD flags) {
-    INPUT input{};
-    input.type = INPUT_MOUSE;
-    input.mi.dwFlags = flags;
-    input.mi.dwExtraInfo = kInjectedMarker;
-    SendInput(1, &input, sizeof(input));
+// A move or size loop only follows the mouse if this thread's synchronized
+// button state says the left button is down. For a resize it never is - the
+// user is holding the right one - and for a move it isn't either when another
+// thread retrieved the press. Without this the loop starts in its keyboard
+// mode instead, where it waits for the arrow keys and ignores the mouse.
+void ForceLeftButtonDown() {
+    if (GetKeyState(VK_LBUTTON) < 0) {
+        return;
+    }
+    BYTE keyState[256];
+    if (GetKeyboardState(keyState)) {
+        keyState[VK_LBUTTON] |= 0x80;
+        SetKeyboardState(keyState);
+    }
 }
 
-// Nearest corner to the cursor, as an HT* hit-test code (Hyprland resizes from
-// the nearest corner).
-UINT ResizeCornerForPoint(const RECT& rc, POINT pt) {
+// Nearest corner to the cursor, as the WMSZ_* code SC_SIZE expects (Hyprland
+// resizes from the nearest corner).
+UINT ResizeEdgeForPoint(const RECT& rc, POINT pt) {
     bool left = pt.x < (rc.left + rc.right) / 2;
     bool top = pt.y < (rc.top + rc.bottom) / 2;
     if (top) {
-        return left ? HTTOPLEFT : HTTOPRIGHT;
+        return left ? WMSZ_TOPLEFT : WMSZ_TOPRIGHT;
     }
-    return left ? HTBOTTOMLEFT : HTBOTTOMRIGHT;
+    return left ? WMSZ_BOTTOMLEFT : WMSZ_BOTTOMRIGHT;
 }
 
 void RequestDrag(HWND root, WPARAM kind, POINT pt) {
@@ -80,17 +94,7 @@ bool StartMove(HWND root, POINT pt, MSG* msg) {
     if (!(GetAsyncKeyState(VK_LBUTTON) & 0x8000)) {
         return false;  // released already; the loop would stick to the cursor
     }
-
-    // The loop only follows the mouse if this thread's synchronized button
-    // state says the button is down, which it is not when another thread
-    // retrieved the press.
-    if (GetKeyState(VK_LBUTTON) >= 0) {
-        BYTE keyState[256];
-        if (GetKeyboardState(keyState)) {
-            keyState[VK_LBUTTON] |= 0x80;
-            SetKeyboardState(keyState);
-        }
-    }
+    ForceLeftButtonDown();
 
     // The system's own caption-drag loop, so the drag gives everything a
     // title-bar drag would: Aero Snap at the screen edges, the Windows 11
@@ -105,44 +109,36 @@ bool StartMove(HWND root, POINT pt, MSG* msg) {
 ////////////////////////////////////////////////////////////////////////////////
 // Resize
 //
-// The system's border-resize loop only tracks the LEFT mouse button, so a
-// synthetic one is held for as long as the resize lasts: the watcher thread
-// presses it, and releases it once the user lets go of the physical right
-// button. That press comes back as an ordinary button-down message, and it is
-// that message which the loop is started from - so the button state the loop
-// sees is real, and the click never reaches the application. Entering with the
-// cursor away from the corner keeps the grab offset, so the resize is
-// relative, like Hyprland's, and because this is the real resize path,
-// GPU-composited windows (Chrome, Electron) reflow live and native menu bars
-// don't flicker.
+// Started from where the cursor is rather than from the corner, so the grab
+// offset is kept and the resize is relative, like Hyprland's. Because this is
+// the system's own resize loop, GPU-composited windows (Chrome, Electron)
+// reflow live and native menu bars don't flicker.
+//
+// The loop ends when the left button is released, which is never going to
+// happen here - the user releases the right one - so a thread waits for that
+// and posts the release the loop is waiting for.
 
-// The resize the next left button-down on this thread belongs to: while this
-// is set, a press is the watcher's, not the user's.
-struct PendingResize {
-    HWND root = nullptr;
-    UINT corner = 0;
-    ULONGLONG tick = 0;
-};
-thread_local PendingResize g_pendingResize;
+// Set while a resize of ours is running: the release below is the mod's, and
+// if the loop has already ended without it - cancelled with Esc - it is the
+// mod's to swallow as well.
+thread_local bool g_pendingRelease;
 
-// The press should arrive a message or two later. Anything later than that is
-// a click that went elsewhere - the cursor left the window just as the resize
-// started, say - and starting a resize from it would come as a surprise.
-constexpr ULONGLONG kPendingResizeTimeoutMs = 1000;
-
-struct ResizeWatch {
+struct ResizeRelease {
+    HWND root;
     int rightVk;
 };
 
-DWORD WINAPI ResizeWatchThread(LPVOID param) {
+DWORD WINAPI ResizeReleaseThread(LPVOID param) {
     {
-        std::unique_ptr<ResizeWatch> watch(static_cast<ResizeWatch*>(param));
-        InjectMouseButton(MOUSEEVENTF_LEFTDOWN);
-        while ((GetAsyncKeyState(watch->rightVk) & 0x8000) &&
+        std::unique_ptr<ResizeRelease> release(
+            static_cast<ResizeRelease*>(param));
+        while ((GetAsyncKeyState(release->rightVk) & 0x8000) &&
                !g_uninitializing) {
             Sleep(8);
         }
-        InjectMouseButton(MOUSEEVENTF_LEFTUP);
+        POINT pt;
+        GetCursorPos(&pt);
+        PostMessageW(release->root, WM_LBUTTONUP, 0, MAKELPARAM(pt.x, pt.y));
     }
     g_modRefCount--;  // the last thing this thread does in the mod's image
     return 0;
@@ -151,61 +147,44 @@ DWORD WINAPI ResizeWatchThread(LPVOID param) {
 // The thread owns its state and nothing waits for it, so a resize leaves no
 // frame of the mod's on the stack of the window's thread. The reference it
 // holds is what keeps the image around for as long as it runs.
-bool StartResizeWatcher() {
-    auto* watch = new ResizeWatch{PhysicalButtonVk(true)};
+bool StartResizeRelease(HWND root) {
+    auto* release = new ResizeRelease{root, PhysicalButtonVk(true)};
     g_modRefCount++;
     HANDLE thread =
-        CreateThread(nullptr, 0, ResizeWatchThread, watch, 0, nullptr);
+        CreateThread(nullptr, 0, ResizeReleaseThread, release, 0, nullptr);
     if (!thread) {
         Wh_Log(L"CreateThread failed (%u)", GetLastError());
         g_modRefCount--;
-        delete watch;
+        delete release;
         return false;
     }
     CloseHandle(thread);
     return true;
 }
 
-void StartResize(HWND root, POINT pt) {
+bool StartResize(HWND root, POINT pt, MSG* msg) {
     if (IsIconic(root) || IsZoomed(root)) {
-        return;
+        return false;
     }
     if (!(GetWindowLongPtrW(root, GWL_STYLE) & WS_THICKFRAME)) {
-        return;  // fixed-size window
+        return false;  // fixed-size window
     }
     RECT rc;
     if (!GetWindowRect(root, &rc)) {
-        return;
-    }
-
-    g_pendingResize = {root, ResizeCornerForPoint(rc, pt), GetTickCount64()};
-    if (!StartResizeWatcher()) {
-        g_pendingResize = {};
-    }
-}
-
-bool HasPendingResize() {
-    return g_pendingResize.root != nullptr &&
-           GetTickCount64() - g_pendingResize.tick <= kPendingResizeTimeoutMs;
-}
-
-bool HandleInjectedResizeEntry(MSG* msg) {
-    PendingResize pending = g_pendingResize;
-    g_pendingResize = {};
-    if (!pending.root ||
-        GetTickCount64() - pending.tick > kPendingResizeTimeoutMs) {
         return false;
     }
     if (!(GetAsyncKeyState(PhysicalButtonVk(true)) & 0x8000)) {
-        // Let go before the loop could start. The watcher notices as well and
-        // releases the synthetic button on its own.
-        return false;
+        return false;  // released already; the loop would stick to the cursor
+    }
+    if (!StartResizeRelease(root)) {
+        return false;  // nothing would end the loop
     }
 
-    msg->hwnd = pending.root;
-    msg->message = WM_NCLBUTTONDOWN;
-    msg->wParam = pending.corner;
-    msg->lParam = MAKELPARAM(msg->pt.x, msg->pt.y);
+    g_pendingRelease = true;
+    ForceLeftButtonDown();
+    msg->message = WM_SYSCOMMAND;
+    msg->wParam = SC_SIZE | ResizeEdgeForPoint(rc, pt);
+    msg->lParam = MAKELPARAM(pt.x, pt.y);
     return true;
 }
 
@@ -221,11 +200,8 @@ bool HandleDragRequest(MSG* msg) {
     if (g_uninitializing || !IsFrameWindow(root)) {
         return false;
     }
-    if (msg->wParam == kDragResize) {
-        StartResize(root, pt);
-        return false;  // the loop is started from the injected press
-    }
-    return StartMove(root, pt, msg);
+    return msg->wParam == kDragResize ? StartResize(root, pt, msg)
+                                      : StartMove(root, pt, msg);
 }
 
 // Per-thread: a button-up to swallow because we swallowed its button-down.
@@ -256,7 +232,7 @@ bool HandleModifierButtonDown(const MSG* msg, bool right) {
 
     if (right) {
         // We consumed the right button-down, so swallow its matching up too:
-        // the resize loop ends on the mod's synthetic left-up, not on the
+        // the resize loop ends on the release the mod posts, not on the
         // physical right-up, which would otherwise reach the app.
         g_swallowButtonUp[1] = true;
     }
@@ -272,4 +248,19 @@ bool HandleButtonUp(bool right) {
     }
     g_swallowButtonUp[right] = false;
     return true;
+}
+
+bool HandleLeftButtonUp() {
+    if (IsInMoveSizeLoop()) {
+        // The loop is what this release is for, and what consumes it.
+        g_pendingRelease = false;
+        return false;
+    }
+    if (g_pendingRelease) {
+        // The loop ended without it, so the application never saw the press
+        // this would have released either.
+        g_pendingRelease = false;
+        return true;
+    }
+    return HandleButtonUp(false);
 }
