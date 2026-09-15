@@ -15,11 +15,34 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <cwctype>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+////////////////////////////////////////////////////////////////////////////////
+// Unloading
+
+// Set before anything is torn down. Everything that installs a hook or a
+// subclass checks it (holding the same lock the teardown takes) so that
+// nothing of ours is put back in place behind the teardown's back.
+extern std::atomic<bool> g_uninitializing;
+
+// How many hook procedures and worker threads of ours are running right now.
+// UnhookWindowsHookEx does not wait for a hook procedure that is executing on
+// another thread, so Wh_ModUninit waits for this to reach zero before letting
+// the image go.
+extern std::atomic<int> g_modRefCount;
+
+struct ModRef {
+    ModRef() { g_modRefCount++; }
+    ~ModRef() { g_modRefCount--; }
+    ModRef(const ModRef&) = delete;
+    ModRef& operator=(const ModRef&) = delete;
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 // Settings
@@ -116,13 +139,16 @@ constexpr DWORD_PTR kRefKeepMenu = 1;
 
 bool IsFrameless(HWND hwnd);
 void MarkDwmTouched(HWND hwnd);
+bool IsDwmTouched(HWND hwnd);
 std::vector<HWND> SnapshotFramelessWindows();
+std::vector<HWND> SnapshotAutoHiddenWindows();
 void RefreshFrame(HWND hwnd);
-bool MakeFrameless(HWND hwnd);
+bool MakeFrameless(HWND hwnd, bool autoHidden);
 void RestoreFrame(HWND hwnd);
 void HandleFramelessRequest(HWND hwnd, WPARAM action);
 void RequestFrameless(HWND hwnd, WPARAM action);
 void AutoHideExistingWindows();
+void RestoreAutoHiddenWindows();
 
 ////////////////////////////////////////////////////////////////////////////////
 // Hotkey
@@ -135,17 +161,31 @@ bool HandleHotkey(const MSG* msg);
 constexpr WORD kMaskVk = 0xE8;  // unassigned VK, only used as "a key was hit"
 constexpr ULONG_PTR kInjectedMarker = 0x48797072;  // 'Hypr'
 
-HINSTANCE ModuleInstance();
 void ArmWinMask();
 void ShutdownWinMask();
 
+// A drag is requested with this message, posted to the window that is to be
+// moved or resized - see the comment at the top of drag.cpp.
+extern UINT g_msgDrag;  // RegisterWindowMessage, set in Wh_ModInit
+
+enum DragKind : WPARAM {
+    kDragMove = 0,
+    kDragResize = 1,
+};
+
 bool IsDragModifierDown();
+bool IsInMoveSizeLoop();
 int PhysicalButtonVk(bool right);
 void InjectMouseButton(DWORD flags);
-void DrainInjectedLeftButton();
 UINT ResizeCornerForPoint(const RECT& rc, POINT pt);
-void StartMove(HWND root, POINT pt);
-void StartResize(HWND root, POINT pt);
+void RequestDrag(HWND root, WPARAM kind, POINT pt);
+
+// Both run on the target window's thread and rewrite the message they are
+// given into the one that starts a system move/resize loop. They return false
+// if there is nothing to start, which means the message is to be swallowed.
+bool HandleDragRequest(MSG* msg);
+bool HasPendingResize();
+bool HandleInjectedResizeEntry(MSG* msg);
 
 // Per-thread: a button-up to swallow because we swallowed its button-down.
 extern thread_local bool g_swallowButtonUp[2];  // [0] = left, [1] = right

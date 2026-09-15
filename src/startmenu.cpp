@@ -19,15 +19,6 @@ std::atomic<bool> g_winMaskArmed{false};
 std::mutex g_maskHooksMutex;
 std::unordered_map<DWORD, HHOOK> g_maskHooks;  // thread id -> its LL hook
 
-HINSTANCE ModuleInstance() {
-    HMODULE module = nullptr;
-    GetModuleHandleExW(
-        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-        reinterpret_cast<LPCWSTR>(&ModuleInstance), &module);
-    return module;
-}
-
 void RemoveAllMaskHooks() {
     std::lock_guard<std::mutex> lock(g_maskHooksMutex);
     for (const auto& [threadId, hook] : g_maskHooks) {
@@ -37,7 +28,9 @@ void RemoveAllMaskHooks() {
 }
 
 LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
-    if (code == HC_ACTION && g_winMaskArmed) {
+    ModRef ref;  // the image must not go away under this procedure
+
+    if (code == HC_ACTION && g_winMaskArmed && !g_uninitializing) {
         auto* info = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
         bool keyUp = wParam == WM_KEYUP || wParam == WM_SYSKEYUP;
         bool isWin = info->vkCode == VK_LWIN || info->vkCode == VK_RWIN;
@@ -72,10 +65,17 @@ void ArmWinMask() {
     }
 
     DWORD threadId = GetCurrentThreadId();
+    // The lock is also what keeps an installation from slipping past the
+    // removal at uninit.
     std::lock_guard<std::mutex> lock(g_maskHooksMutex);
+    if (g_uninitializing) {
+        return;
+    }
     if (!g_maskHooks.count(threadId)) {
+        // A low-level hook procedure is called in the thread that installed
+        // it, so no module handle is needed.
         HHOOK hook = SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc,
-                                       ModuleInstance(), 0);
+                                       nullptr, 0);
         if (hook) {
             g_maskHooks[threadId] = hook;
         }

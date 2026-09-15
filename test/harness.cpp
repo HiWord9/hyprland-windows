@@ -136,18 +136,33 @@ static void CaptureWindow(HWND hwnd, const char* name, int margin = 24) {
 ////////////////////////////////////////////////////////////////////////////////
 // Test window
 
-static int g_sizeMoveEnter, g_sizeMoveExit, g_mouseMovesSeen;
+static int g_sizeMoveEnter, g_sizeMoveExit;
+// Mouse moves the window got while a move/resize loop was running: the loop
+// owns the mouse for as long as it lasts. Counted from WM_ENTERSIZEMOVE,
+// because the request that starts a resize is answered asynchronously, so
+// ordinary input still reaches the app until then.
+static int g_mouseMovesSeen;
+// Clicks the window got in its client area, which during a Win + mouse drag
+// has to stay zero: neither the press the mod consumes nor the synthetic one
+// it drives the resize loop with may reach the app.
+static int g_clientClicksSeen;
 
 static LRESULT CALLBACK TestWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_ENTERSIZEMOVE:
             g_sizeMoveEnter++;
+            g_mouseMovesSeen = 0;
             break;
         case WM_EXITSIZEMOVE:
             g_sizeMoveExit++;
             break;
         case WM_MOUSEMOVE:
             g_mouseMovesSeen++;
+            break;
+        case WM_LBUTTONDOWN:
+        case WM_LBUTTONDBLCLK:
+        case WM_LBUTTONUP:
+            g_clientClicksSeen++;
             break;
         case WM_PAINT: {
             PAINTSTRUCT ps;
@@ -514,6 +529,8 @@ static void TestFramelessGeometry(bool withMenu, MenuBarMode mode) {
     // Unload path: synchronous restore of every tracked window.
     Wh_ModBeforeUninit();
     Pump(200);
+    // Uninit is one-way for the mod, but the harness carries on afterwards.
+    g_uninitializing = false;
     CHECK(!IsFrameless(hwnd), "BeforeUninit restored the window");
     RECT cli4 = ClientRectOnScreen(hwnd);
     CHECK(EqualRect(&cli4, &cli0), "BeforeUninit: original client rect");
@@ -529,11 +546,11 @@ static void TestFramelessGeometry(bool withMenu, MenuBarMode mode) {
 
 // Pumps without calling ProcessRetrievedMessage, so only the mod's own hook
 // can act on the messages.
-static void PumpRaw(DWORD ms) {
+static void PumpRaw(DWORD ms, UINT extraFlags = 0) {
     DWORD end = GetTickCount() + ms;
     for (;;) {
         MSG msg;
-        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE | extraFlags)) {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
@@ -569,18 +586,28 @@ static void TestMessageHook() {
     PumpRaw(400);
     CHECK(IsFrameless(hwnd), "the hook picked the hotkey up and hid the bar");
 
+    // A pump that filters with the PM_QS_* flags passes them in the hook's
+    // wParam alongside PM_REMOVE, which must not stop the interception.
+    PostMessageW(hwnd, WM_KEYDOWN, 'H', 1);
+    PumpRaw(400, PM_QS_POSTMESSAGE);
+    CHECK(!IsFrameless(hwnd), "a pump passing PM_QS_* flags is intercepted");
+
     RemoveMessageHooks();
     PostMessageW(hwnd, WM_KEYDOWN, 'H', 1);
     PumpRaw(300);
-    CHECK(IsFrameless(hwnd), "after removal the hotkey is ignored again");
+    CHECK(!IsFrameless(hwnd), "after removal the hotkey is ignored again");
 
-    // Removing the hooks must not leave the thread unable to get them back.
+    // A thread only tries once, so it takes a fresh image - which is what a
+    // reloaded mod is - to get the hook back.
+    g_messageHookAttempted = false;
     InstallMessageHookForThread();
     PostMessageW(hwnd, WM_KEYDOWN, 'H', 1);
     PumpRaw(400);
-    CHECK(!IsFrameless(hwnd), "the hook can be installed again afterwards");
+    CHECK(IsFrameless(hwnd), "a reloaded mod hooks the thread again");
 
     RemoveMessageHooks();
+    RequestFrameless(hwnd, kActionShow);
+    Pump(200);
     DestroyWindow(hwnd);
     Pump(100);
 }
@@ -651,12 +678,13 @@ static void MoveCursorGradually(POINT from, POINT to, int steps) {
 }
 
 // Presses the button, retrieves the button-down message the way the message
-// hook does (retrieved but not dispatched), runs the mod's move/resize entry
-// point on this thread (which blocks in the modal loop) while another thread
-// drags the mouse and releases the button. With cancel=true, Esc is pressed
-// before the button is released.
+// hook does (retrieved but not dispatched), asks the mod for the drag, and
+// pumps messages the way an application does - which is where the system's
+// move/resize loop is entered from - while another thread drags the mouse and
+// releases the button. With cancel=true, Esc is pressed before the button is
+// released.
 static void DragWith(bool right, HWND hwnd, POINT start, POINT delta,
-                     void (*entry)(HWND, POINT), bool cancel = false) {
+                     WPARAM kind, bool cancel = false) {
     SetCursorPos(start.x, start.y);
     Sleep(50);
     SendMouse(right ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN);
@@ -665,6 +693,11 @@ static void DragWith(bool right, HWND hwnd, POINT start, POINT delta,
     UINT downMsg = right ? WM_RBUTTONDOWN : WM_LBUTTONDOWN;
     bool gotDown = PeekMessageW(&down, nullptr, downMsg, downMsg, PM_REMOVE);
     CHECK(gotDown, "button-down message retrieved before the drag");
+    if (right) {
+        // What HandleModifierButtonDown does for the press it consumes.
+        g_swallowButtonUp[1] = true;
+    }
+    RequestDrag(hwnd, kind, start);
 
     std::thread mover([=] {
         Sleep(200);
@@ -685,17 +718,32 @@ static void DragWith(bool right, HWND hwnd, POINT start, POINT delta,
 
     int enter0 = g_sizeMoveEnter, exit0 = g_sizeMoveExit;
     g_mouseMovesSeen = 0;
+    g_clientClicksSeen = 0;
     DWORD t0 = GetTickCount();
-    entry(hwnd, start);
+    // The loop runs inside DispatchMessage, so this is what blocks in it.
+    for (int i = 0; i < 60 && g_sizeMoveExit == exit0; i++) {
+        PumpRaw(50);
+    }
     DWORD elapsed = GetTickCount() - t0;
     mover.join();
     printf("  modal loop ran for %lu ms\n", (unsigned long)elapsed);
     CHECK(elapsed >= 150, "the loop blocked until the button was released");
     CHECK(g_sizeMoveEnter == enter0 + 1 && g_sizeMoveExit == exit0 + 1,
           "WM_ENTERSIZEMOVE / WM_EXITSIZEMOVE delivered once");
-    CHECK(g_mouseMovesSeen == 0, "app saw no WM_MOUSEMOVE during the drag");
+    // A single move can still slip through as the loop takes the mouse over.
+    // What matters is that the drag itself - a dozen of them - does not.
+    CHECK(g_mouseMovesSeen <= 1, "app saw no mouse moves during the drag (%d)",
+          g_mouseMovesSeen);
+    CHECK(g_clientClicksSeen == 0, "app saw no click of its own during it");
     CHECK(GetCapture() == nullptr, "mouse capture released");
-    Pump(50);
+    PumpRaw(100);
+    if (!cancel) {
+        CHECK(!g_swallowButtonUp[0] && !g_swallowButtonUp[1],
+              "no button-up left flagged afterwards");
+    }
+    // A cancelled drag can end with the cursor outside the window, and its
+    // release then lands on whatever is there instead.
+    g_swallowButtonUp[0] = g_swallowButtonUp[1] = false;
 }
 
 static void TestMoveResize() {
@@ -704,12 +752,17 @@ static void TestMoveResize() {
     POINT savedCursor;
     GetCursorPos(&savedCursor);
 
+    // With the mod's own hook in place, so that the messages the system's
+    // loops pump are seen exactly the way they are in an application.
+    g_messageHookAttempted = false;
+    InstallMessageHookForThread();
+
     HWND hwnd = CreateTestWindow(L"Hypr drag test", false, 160, 160);
-    Pump(300);
+    PumpRaw(300);
     RequestFrameless(hwnd, kActionHide);
-    Pump(300);
+    PumpRaw(300);
     SetForegroundWindow(hwnd);
-    Pump(100);
+    PumpRaw(100);
 
     RECT before;
     GetWindowRect(hwnd, &before);
@@ -717,8 +770,8 @@ static void TestMoveResize() {
                  (before.top + before.bottom) / 2};
 
     // Move.
-    DragWith(false, hwnd, center, {140, 90}, StartMove);
-    Pump(100);
+    DragWith(false, hwnd, center, {140, 90}, kDragMove);
+    PumpRaw(100);
     RECT after;
     GetWindowRect(hwnd, &after);
     PrintRects("after move", hwnd);
@@ -731,8 +784,8 @@ static void TestMoveResize() {
     // Resize from the bottom-right quadrant, starting well inside the window.
     RECT r0 = after;
     POINT p{r0.right - 80, r0.bottom - 60};
-    DragWith(true, hwnd, p, {100, 70}, StartResize);
-    Pump(100);
+    DragWith(true, hwnd, p, {100, 70}, kDragResize);
+    PumpRaw(100);
     RECT r1;
     GetWindowRect(hwnd, &r1);
     POINT cur;
@@ -750,8 +803,8 @@ static void TestMoveResize() {
     // Resize from the top-left quadrant.
     RECT r2 = r1;
     POINT q{r2.left + 60, r2.top + 40};
-    DragWith(true, hwnd, q, {-50, -30}, StartResize);
-    Pump(100);
+    DragWith(true, hwnd, q, {-50, -30}, kDragResize);
+    PumpRaw(100);
     RECT r3;
     GetWindowRect(hwnd, &r3);
     PrintRects("after resize (TL)", hwnd);
@@ -763,12 +816,12 @@ static void TestMoveResize() {
 
     // Drag a maximized window: it should restore and follow the cursor.
     ShowWindow(hwnd, SW_MAXIMIZE);
-    Pump(400);
+    PumpRaw(400);
     RECT rMax;
     GetWindowRect(hwnd, &rMax);
     POINT m{rMax.left + 300, rMax.top + 60};
-    DragWith(false, hwnd, m, {80, 120}, StartMove);
-    Pump(200);
+    DragWith(false, hwnd, m, {80, 120}, kDragMove);
+    PumpRaw(200);
     RECT r4;
     GetWindowRect(hwnd, &r4);
     PrintRects("after maximized drag", hwnd);
@@ -781,30 +834,36 @@ static void TestMoveResize() {
     // Esc cancels a drag and puts the window back.
     RECT r5 = r4;
     POINT c{(r5.left + r5.right) / 2, (r5.top + r5.bottom) / 2};
-    DragWith(false, hwnd, c, {90, 60}, StartMove, /*cancel=*/true);
-    Pump(100);
+    DragWith(false, hwnd, c, {90, 60}, kDragMove, /*cancel=*/true);
+    PumpRaw(100);
     RECT r6;
     GetWindowRect(hwnd, &r6);
     PrintRects("after cancelled move", hwnd);
     CHECK(EqualRect(&r6, &r5), "Esc restored the original position");
     DragWith(true, hwnd, {r5.right - 40, r5.bottom - 40}, {60, 60},
-             StartResize, /*cancel=*/true);
-    Pump(100);
+             kDragResize, /*cancel=*/true);
+    PumpRaw(100);
     GetWindowRect(hwnd, &r6);
     CHECK(EqualRect(&r6, &r5), "Esc restored the original size");
 
-    // Button-up bookkeeping: after complete drags nothing is pending. (The
-    // real swallow flag is set by HandleModifierButtonDown; the mechanism it
-    // relies on is exercised directly below.)
-    CHECK(!g_swallowButtonUp[0] && !g_swallowButtonUp[1],
-          "no orphaned button-up flagged after complete drags");
+    // Requests that must not start anything. A move needs the button to
+    // still be down (nothing is held here), and a fixed-size window has
+    // nothing to resize - in which case no synthetic button may be left held
+    // either.
+    int enter0 = g_sizeMoveEnter;
+    RequestDrag(hwnd, kDragMove, c);
+    PumpRaw(300);
+    CHECK(g_sizeMoveEnter == enter0,
+          "a move request with the button already up starts no loop");
 
-    // A no-op resize (fixed-size window) returns immediately without hanging.
     LONG_PTR st = GetWindowLongPtrW(hwnd, GWL_STYLE);
     SetWindowLongPtrW(hwnd, GWL_STYLE, st & ~WS_THICKFRAME);
-    DWORD t = GetTickCount();
-    StartResize(hwnd, c);
-    CHECK(GetTickCount() - t < 500, "no-op resize returns immediately");
+    RequestDrag(hwnd, kDragResize, c);
+    PumpRaw(300);
+    CHECK(g_sizeMoveEnter == enter0,
+          "a resize request for a fixed-size window starts no loop");
+    CHECK(!(GetAsyncKeyState(VK_LBUTTON) & 0x8000),
+          "and leaves no synthetic mouse button held");
     SetWindowLongPtrW(hwnd, GWL_STYLE, st);
 
     // A pending (consumed) right button-up is swallowed exactly once.
@@ -817,6 +876,14 @@ static void TestMoveResize() {
     ProcessRetrievedMessage(&ru2);
     CHECK(ru2.message == WM_RBUTTONUP, "next button-up passes through");
 
+    // A flag left over from a press whose release went elsewhere must not
+    // swallow the release of the next one.
+    g_swallowButtonUp[1] = true;
+    MSG rd{hwnd, WM_RBUTTONDOWN, 0, 0, 0, c};
+    ProcessRetrievedMessage(&rd);
+    CHECK(rd.message == WM_RBUTTONDOWN && !g_swallowButtonUp[1],
+          "a fresh press clears a stale swallow flag");
+
     // Modifier gate: without the modifier held, clicks pass through.
     MSG click{hwnd, WM_LBUTTONDOWN, 0, 0, 0, center};
     ProcessRetrievedMessage(&click);
@@ -824,6 +891,7 @@ static void TestMoveResize() {
           "click without modifier passes through");
 
     SetCursorPos(savedCursor.x, savedCursor.y);
+    RemoveMessageHooks();
     DestroyWindow(hwnd);
     Pump(100);
 }

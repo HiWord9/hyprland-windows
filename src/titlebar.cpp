@@ -6,6 +6,9 @@ UINT g_msgFrameless;  // RegisterWindowMessage, set in Wh_ModInit
 
 struct FramelessState {
     bool dwmTouched = false;
+    // The title bar was hidden by "hide by default", not by the hotkey, so
+    // turning that setting off brings it back.
+    bool autoHidden = false;
     // Style bits removed from the window (KeepMenu mode), restored later.
     DWORD removedStyle = 0;
 };
@@ -25,12 +28,29 @@ void MarkDwmTouched(HWND hwnd) {
     }
 }
 
+bool IsDwmTouched(HWND hwnd) {
+    std::lock_guard<std::mutex> lock(g_windowsMutex);
+    auto it = g_windows.find(hwnd);
+    return it != g_windows.end() && it->second.dwmTouched;
+}
+
 std::vector<HWND> SnapshotFramelessWindows() {
     std::lock_guard<std::mutex> lock(g_windowsMutex);
     std::vector<HWND> result;
     result.reserve(g_windows.size());
     for (const auto& [hwnd, state] : g_windows) {
         result.push_back(hwnd);
+    }
+    return result;
+}
+
+std::vector<HWND> SnapshotAutoHiddenWindows() {
+    std::lock_guard<std::mutex> lock(g_windowsMutex);
+    std::vector<HWND> result;
+    for (const auto& [hwnd, state] : g_windows) {
+        if (state.autoHidden) {
+            result.push_back(hwnd);
+        }
     }
     return result;
 }
@@ -48,6 +68,8 @@ LRESULT CALLBACK FramelessSubclassProc(HWND hwnd,
                                        LPARAM lParam,
                                        UINT_PTR uIdSubclass,
                                        DWORD_PTR dwRefData) {
+    ModRef ref;  // the image must not go away under this procedure
+
     bool keepMenu = (dwRefData & kRefKeepMenu) != 0;
 
     switch (uMsg) {
@@ -85,7 +107,7 @@ LRESULT CALLBACK FramelessSubclassProc(HWND hwnd,
     return DefSubclassProc(hwnd, uMsg, wParam, lParam);
 }
 
-bool MakeFrameless(HWND hwnd) {
+bool MakeFrameless(HWND hwnd, bool autoHidden) {
     if (!IsFrameWindow(hwnd)) {
         Wh_Log(L"Window %p is not eligible", hwnd);
         return false;
@@ -122,6 +144,7 @@ bool MakeFrameless(HWND hwnd) {
     {
         std::lock_guard<std::mutex> lock(g_windowsMutex);
         FramelessState state;
+        state.autoHidden = autoHidden;
         state.removedStyle = removedStyle;
         g_windows[hwnd] = state;
     }
@@ -162,7 +185,8 @@ void RestoreFrame(HWND hwnd) {
 }
 
 void HandleFramelessRequest(HWND hwnd, WPARAM action) {
-    if (action == kActionAutoHide) {
+    bool autoHide = action == kActionAutoHide;
+    if (autoHide) {
         // Re-check now that the window is done being created. A window that
         // never becomes visible is left alone: toolkits create throwaway
         // top-level windows during start-up (to probe for a pixel format, for
@@ -178,7 +202,10 @@ void HandleFramelessRequest(HWND hwnd, WPARAM action) {
         action = frameless ? kActionShow : kActionHide;
     }
     if (action == kActionHide && !frameless) {
-        MakeFrameless(hwnd);
+        if (g_uninitializing) {
+            return;  // the title bars are being put back, not taken away
+        }
+        MakeFrameless(hwnd, autoHide);
     } else if (action == kActionShow && frameless) {
         RestoreFrame(hwnd);
     }
@@ -206,4 +233,12 @@ BOOL CALLBACK AutoHideEnumProc(HWND hwnd, LPARAM lParam) {
 
 void AutoHideExistingWindows() {
     EnumWindows(AutoHideEnumProc, (LPARAM)GetCurrentProcessId());
+}
+
+// "Hide by default" was turned off: the windows it took are handed back. Ones
+// hidden with the hotkey stay as they are.
+void RestoreAutoHiddenWindows() {
+    for (HWND hwnd : SnapshotAutoHiddenWindows()) {
+        RequestFrameless(hwnd, kActionShow);
+    }
 }

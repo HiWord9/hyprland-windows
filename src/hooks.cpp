@@ -11,18 +11,9 @@
 // message is handed over, so nothing of ours stays on the stack.
 #include "common.h"
 
-#include <tlhelp32.h>
-
 // Called for every message an application removes from its queue. Returns
 // with the message replaced by WM_NULL if it was consumed by the mod.
 void ProcessRetrievedMessage(MSG* msg) {
-    // Never act on the mod's own injected input (used to drive the resize
-    // loop), and never turn it into WM_NULL - the native loop needs to see its
-    // synthetic left-button-up to end.
-    if ((ULONG_PTR)GetMessageExtraInfo() == kInjectedMarker) {
-        return;
-    }
-
     bool consumed = false;
 
     switch (msg->message) {
@@ -35,7 +26,12 @@ void ProcessRetrievedMessage(MSG* msg) {
         case WM_LBUTTONDBLCLK:
         case WM_NCLBUTTONDOWN:
         case WM_NCLBUTTONDBLCLK:
-            consumed = HandleModifierButtonDown(msg, false);
+            // A press arriving while a resize waits for its synthetic button
+            // is that button, and is what the resize loop is started from.
+            // Any other press may ask for a move.
+            consumed = HasPendingResize()
+                           ? !HandleInjectedResizeEntry(msg)
+                           : HandleModifierButtonDown(msg, false);
             break;
 
         case WM_RBUTTONDOWN:
@@ -47,7 +43,15 @@ void ProcessRetrievedMessage(MSG* msg) {
 
         case WM_LBUTTONUP:
         case WM_NCLBUTTONUP:
-            consumed = HandleButtonUp(false);
+            // The mod's synthetic release is what ends a resize loop, so it
+            // has to reach it. Outside a loop - a resize cancelled with Esc -
+            // it is ours to swallow. Only the mod injects left-button input,
+            // so its marker is what tells the two apart.
+            if ((ULONG_PTR)GetMessageExtraInfo() == kInjectedMarker) {
+                consumed = !IsInMoveSizeLoop();
+            } else {
+                consumed = HandleButtonUp(false);
+            }
             break;
 
         case WM_RBUTTONUP:
@@ -56,7 +60,12 @@ void ProcessRetrievedMessage(MSG* msg) {
             break;
 
         default:
-            if (msg->message == g_msgFrameless && msg->hwnd) {
+            if (!msg->hwnd) {
+                break;
+            }
+            if (msg->message == g_msgDrag) {
+                consumed = !HandleDragRequest(msg);
+            } else if (msg->message == g_msgFrameless) {
                 HandleFramelessRequest(msg->hwnd, msg->wParam);
                 consumed = true;
             }
@@ -76,29 +85,50 @@ void ProcessRetrievedMessage(MSG* msg) {
 std::mutex g_messageHooksMutex;
 std::unordered_map<DWORD, HHOOK> g_messageHooks;  // thread id -> its hook
 
+// Set once per thread, so the common case - a thread that has its hook
+// already - costs nothing. With "*" as the include pattern this runs for every
+// window every application ever creates.
+thread_local bool g_messageHookAttempted;
+
 LRESULT CALLBACK GetMessageProc(int code, WPARAM wParam, LPARAM lParam) {
-    // PM_NOREMOVE means the app is only looking at the message; it stays in the
-    // queue and we must not consume it.
-    if (code == HC_ACTION && wParam == PM_REMOVE) {
+    ModRef ref;  // the image must not go away under this procedure
+
+    // wParam carries the flags the caller passed to PeekMessage, which often
+    // include the PM_QS_* filter bits, so it is a bitwise test. PM_NOREMOVE
+    // means the app is only looking at the message; it stays in the queue and
+    // we must not consume it.
+    if (code == HC_ACTION && (wParam & PM_REMOVE) && lParam &&
+        !g_uninitializing) {
         ProcessRetrievedMessage(reinterpret_cast<MSG*>(lParam));
     }
     return CallNextHookEx(nullptr, code, wParam, lParam);
 }
 
-void InstallMessageHookForThread() {
-    DWORD threadId = GetCurrentThreadId();
-    std::lock_guard<std::mutex> lock(g_messageHooksMutex);
-    if (g_messageHooks.count(threadId)) {
+// Callers hold g_messageHooksMutex, which is also what keeps an installation
+// from slipping past the removal at uninit.
+void InstallMessageHookLocked(DWORD threadId) {
+    if (g_uninitializing || g_messageHooks.count(threadId)) {
         return;
     }
-    HHOOK hook = SetWindowsHookExW(WH_GETMESSAGE, GetMessageProc,
-                                   ModuleInstance(), threadId);
+    // A thread hook on a thread of this process wants no module handle.
+    HHOOK hook =
+        SetWindowsHookExW(WH_GETMESSAGE, GetMessageProc, nullptr, threadId);
     if (hook) {
         g_messageHooks[threadId] = hook;
     } else {
         Wh_Log(L"WH_GETMESSAGE hook failed for thread %u (%u)", threadId,
                GetLastError());
     }
+}
+
+void InstallMessageHookForThread() {
+    if (g_messageHookAttempted) {
+        return;
+    }
+    g_messageHookAttempted = true;
+
+    std::lock_guard<std::mutex> lock(g_messageHooksMutex);
+    InstallMessageHookLocked(GetCurrentThreadId());
 }
 
 // Covers the threads that already had windows when the mod was loaded; threads
@@ -111,13 +141,7 @@ BOOL CALLBACK InstallHookEnumProc(HWND hwnd, LPARAM lParam) {
     }
 
     std::lock_guard<std::mutex> lock(g_messageHooksMutex);
-    if (!g_messageHooks.count(threadId)) {
-        HHOOK hook = SetWindowsHookExW(WH_GETMESSAGE, GetMessageProc,
-                                       ModuleInstance(), threadId);
-        if (hook) {
-            g_messageHooks[threadId] = hook;
-        }
-    }
+    InstallMessageHookLocked(threadId);
     return TRUE;
 }
 
