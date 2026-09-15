@@ -4,6 +4,7 @@
 // @description     Move and resize windows with Win + mouse from anywhere on them, like in Hyprland, and hide title bars with a hotkey
 // @version         0.0.1
 // @author          hiword9
+// @github          https://github.com/HiWord9
 // @include         *
 // @compilerOptions -lcomctl32 -ldwmapi
 // @license         GPL-3.0
