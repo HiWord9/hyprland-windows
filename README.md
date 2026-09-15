@@ -21,14 +21,10 @@ bar are all configurable in the mod's settings in Windhawk.
 
 1. Download `hyprland-windows.wh.cpp` from the
    [latest release](../../releases/latest).
-2. Quit Windhawk (right-click its tray icon → Exit).
-3. Copy the file into `C:\ProgramData\Windhawk\ModsSource\` — the folder needs
-   administrator rights.
-4. Start Windhawk. The mod appears with a warning that it has to be compiled —
-   press **Compile** and it is ready.
-
-Alternatively, skip the file copying: in Windhawk choose *Create new mod*,
-paste the contents of the file into the editor and compile it there.
+2. In Windhawk, choose **Create new mod**.
+3. Open the downloaded file, copy everything in it, and paste it into the
+   editor, replacing what is already there.
+4. Press **Compile** (<kbd>Ctrl</kbd>+<kbd>B</kbd>) and the mod is ready.
 
 ## Good to know
 
