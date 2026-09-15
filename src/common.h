@@ -60,7 +60,7 @@ struct Settings {
     std::atomic<bool> hotkeyShift{false};
     std::atomic<bool> hotkeyWin{false};
     std::atomic<DragModifier> dragModifier{DragModifier::Win};
-    std::atomic<bool> topEdgeResize{true};
+    std::atomic<bool> topEdgeResize{false};
     std::atomic<MenuBarMode> menuBarMode{MenuBarMode::Hide};
     std::atomic<bool> hideByDefault{false};
     std::atomic<COLORREF> borderActive{kColorUntouched};

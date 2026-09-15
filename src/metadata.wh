@@ -57,11 +57,12 @@ how much of the frame goes away with the title bar.
   $options:
   - win: Win (Super)
   - alt: Alt
-- topEdgeResize: true
+- topEdgeResize: false
   $name: Resize from the top edge
   $description: >-
     When the title bar is hidden, the top few pixels of the window act as a
-    resize handle, like the other edges
+    resize handle, like the other edges. Off by default, because it takes those
+    pixels away from whatever the app draws there.
 - menuBarWindows: hide
   $name: Windows with a menu bar
   $description: >-
