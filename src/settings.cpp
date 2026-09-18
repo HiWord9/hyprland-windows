@@ -121,11 +121,17 @@ MenuBarMode ParseMenuBarMode(PCWSTR raw) {
     return MenuBarMode::Hide;
 }
 
-// Anything but "opaque" fades, so a setting Windhawk has never written out -
-// an empty string - means the fade is on, the way the settings say it is.
-bool ParseDragTranslucency(PCWSTR raw) {
+// Anything unrecognized fades both drags, so a setting Windhawk has never
+// written out - an empty string - means what the settings say it does.
+DragTranslucency ParseDragTranslucency(PCWSTR raw) {
     std::wstring s = NormalizeSettingString(raw);
-    return s != L"OPAQUE" && s != L"OFF" && s != L"NONE";
+    if (s == L"OPAQUE" || s == L"OFF" || s == L"NONE") {
+        return DragTranslucency::Off;
+    }
+    if (s == L"MOVE" || s == L"MOVEONLY") {
+        return DragTranslucency::MoveOnly;
+    }
+    return DragTranslucency::Both;
 }
 
 // A setting Windhawk has never written out reads as zero, which is why zero
@@ -234,6 +240,7 @@ void LoadSettings() {
            (int)g_settings.hotkeyWin,
            g_settings.dragModifier == DragModifier::Alt ? L"alt" : L"win",
            (int)g_settings.topEdgeResize, (int)g_settings.menuBarMode.load(),
-           (int)g_settings.hideByDefault, (int)g_settings.dragTranslucency,
+           (int)g_settings.hideByDefault,
+           (int)g_settings.dragTranslucency.load(),
            g_settings.dragOpacity.load());
 }

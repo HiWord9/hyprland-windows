@@ -145,9 +145,15 @@ DWORD WINAPI DragFadeThread(LPVOID param) {
 
 // Called from the drag request, on the window's own thread, once a move or
 // size loop is about to start.
-void BeginDragFade(HWND root) {
+void BeginDragFade(HWND root, WPARAM kind) {
+    DragTranslucency mode = g_settings.dragTranslucency;
     int opacity = g_settings.dragOpacity;
-    if (g_uninitializing || !g_settings.dragTranslucency || opacity >= 100) {
+    if (g_uninitializing || mode == DragTranslucency::Off || opacity >= 100) {
+        return;
+    }
+    // A resize is the one drag you may want to watch reflow as it happens,
+    // rather than through the window.
+    if (mode == DragTranslucency::MoveOnly && kind == kDragResize) {
         return;
     }
 

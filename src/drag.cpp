@@ -205,10 +205,13 @@ bool HandleDragRequest(MSG* msg) {
     if (g_uninitializing || !IsFrameWindow(root)) {
         return false;
     }
-    bool started = msg->wParam == kDragResize ? StartResize(root, pt, msg)
-                                              : StartMove(root, pt, msg);
+    // Kept, because starting the drag is what overwrites it with the system
+    // command the loop needs.
+    WPARAM kind = msg->wParam;
+    bool started = kind == kDragResize ? StartResize(root, pt, msg)
+                                       : StartMove(root, pt, msg);
     if (started) {
-        BeginDragFade(root);
+        BeginDragFade(root, kind);
     }
     return started;
 }

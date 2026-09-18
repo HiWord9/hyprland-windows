@@ -339,10 +339,16 @@ static void TestParsers() {
     CHECK(ResizeEdgeForPoint(rc, {280, 280}) == WMSZ_BOTTOMRIGHT,
           "corner bottom-right");
 
-    CHECK(ParseDragTranslucency(L""), "translucency defaults to the fade");
-    CHECK(ParseDragTranslucency(L"fade"), "translucency fade");
-    CHECK(!ParseDragTranslucency(L"opaque"), "translucency opaque");
-    CHECK(!ParseDragTranslucency(L" OFF "), "translucency off");
+    CHECK(ParseDragTranslucency(L"") == DragTranslucency::Both,
+          "translucency defaults to both drags");
+    CHECK(ParseDragTranslucency(L"fade") == DragTranslucency::Both,
+          "translucency fade");
+    CHECK(ParseDragTranslucency(L"move") == DragTranslucency::MoveOnly,
+          "translucency move only");
+    CHECK(ParseDragTranslucency(L"opaque") == DragTranslucency::Off,
+          "translucency opaque");
+    CHECK(ParseDragTranslucency(L" OFF ") == DragTranslucency::Off,
+          "translucency off");
 
     CHECK(ClampedSetting(0, 85, 10, 100) == 85,
           "a setting that was never written means the default");
@@ -1004,7 +1010,7 @@ static void TestDragFade() {
 
     HWND hwnd = CreateTestWindow(L"Hypr fade test", false, 200, 200);
     LONG_PTR ex0 = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-    BeginDragFade(hwnd);
+    BeginDragFade(hwnd, kDragMove);
     CHECK(IsDragFading(hwnd), "a drag arms the fade");
     CHECK(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_LAYERED,
           "and makes the window layered");
@@ -1032,7 +1038,7 @@ static void TestDragFade() {
         GetWindowLongPtrW(translucent, GWL_EXSTYLE) | WS_EX_LAYERED);
     SetLayeredWindowAttributes(translucent, 0, 180, LWA_ALPHA);
     Pump(100);
-    BeginDragFade(translucent);
+    BeginDragFade(translucent, kDragMove);
     CHECK(IsDragFading(translucent), "an already translucent window fades too");
     CHECK(DragAlphaFor(180, g_settings.dragOpacity) < 180,
           "to less than it was");
@@ -1055,29 +1061,43 @@ static void TestDragFade() {
                       GetWindowLongPtrW(perPixel, GWL_EXSTYLE) | WS_EX_LAYERED);
     CHECK(GetLayeredWindowAttributes(perPixel, &key, &alpha, &flags) && !flags,
           "a freshly layered window reports no attributes set (0x%lX)", flags);
-    BeginDragFade(perPixel);
+    BeginDragFade(perPixel, kDragMove);
     CHECK(!IsDragFading(perPixel),
           "which the fade stays out of - the app may be about to paint it");
     PaintPerPixel(perPixel);
     CHECK(!GetLayeredWindowAttributes(perPixel, &key, &alpha, &flags),
           "and once it has, there is nothing to read at all");
-    BeginDragFade(perPixel);
+    BeginDragFade(perPixel, kDragMove);
     CHECK(!IsDragFading(perPixel), "which the fade stays out of as well");
     DestroyWindow(perPixel);
     Pump(100);
 
-    HWND off = CreateTestWindow(L"Hypr fade test 4", false, 320, 320);
-    g_settings.dragTranslucency = false;
-    BeginDragFade(off);
-    CHECK(!IsDragFading(off), "the setting turns the fade off");
-    g_settings.dragTranslucency = true;
+    HWND modes = CreateTestWindow(L"Hypr fade test 4", false, 320, 320);
+    g_settings.dragTranslucency = DragTranslucency::Off;
+    BeginDragFade(modes, kDragMove);
+    CHECK(!IsDragFading(modes), "the setting turns the fade off");
+
+    g_settings.dragTranslucency = DragTranslucency::MoveOnly;
+    BeginDragFade(modes, kDragResize);
+    CHECK(!IsDragFading(modes), "move-only leaves a resize opaque");
+
+    g_settings.dragTranslucency = DragTranslucency::Both;
     g_settings.dragOpacity = 100;
-    BeginDragFade(off);
-    CHECK(!IsDragFading(off), "and so does an opacity of 100%%");
-    CHECK(!(GetWindowLongPtrW(off, GWL_EXSTYLE) & WS_EX_LAYERED),
-          "neither of them touches the window");
+    BeginDragFade(modes, kDragMove);
+    CHECK(!IsDragFading(modes), "and so does an opacity of 100%%");
+    CHECK(!(GetWindowLongPtrW(modes, GWL_EXSTYLE) & WS_EX_LAYERED),
+          "none of them touches the window");
+
+    // Move-only still fades a move, which is the point of it.
     g_settings.dragOpacity = kDefaultDragOpacity;
-    DestroyWindow(off);
+    g_settings.dragTranslucency = DragTranslucency::MoveOnly;
+    BeginDragFade(modes, kDragMove);
+    CHECK(IsDragFading(modes), "move-only still fades a move");
+    for (int i = 0; i < 20 && IsDragFading(modes); i++) {
+        Pump(100);
+    }
+    g_settings.dragTranslucency = DragTranslucency::Both;
+    DestroyWindow(modes);
     Pump(100);
 }
 

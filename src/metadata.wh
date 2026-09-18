@@ -61,11 +61,12 @@ translucency, and how much of the frame goes away with the title bar.
 - dragTranslucency: fade
   $name: Translucency while dragging
   $description: >-
-    Fade a window to translucent while it is being moved or resized, the way
-    Hyprland does
+    Fade a window to translucent while it is being dragged, the way Hyprland
+    does, and back when the drag ends
   $options:
-  - fade: Fade it out, and back in when the drag ends
-  - opaque: Keep it opaque
+  - fade: While moving and while resizing
+  - move: While moving only
+  - opaque: Never
 - dragOpacity: 85
   $name: Opacity while dragging
   $description: >-

@@ -49,6 +49,8 @@ struct ModRef {
 
 enum class DragModifier { Win, Alt };
 enum class MenuBarMode { Hide, KeepMenu, Skip };
+// Which drags fade the window they are dragging.
+enum class DragTranslucency { Both, MoveOnly, Off };
 
 // Sentinel for "leave the DWM attribute alone" (not a valid DWM color value).
 constexpr COLORREF kColorUntouched = 0xFFFFFFFD;
@@ -68,7 +70,7 @@ struct Settings {
     std::atomic<bool> hotkeyWin{false};
     std::atomic<DragModifier> dragModifier{DragModifier::Win};
     std::atomic<bool> topEdgeResize{false};
-    std::atomic<bool> dragTranslucency{true};
+    std::atomic<DragTranslucency> dragTranslucency{DragTranslucency::Both};
     std::atomic<int> dragOpacity{kDefaultDragOpacity};
     std::atomic<int> dragFadeIn{kDefaultDragFadeIn};
     std::atomic<int> dragFadeOut{kDefaultDragFadeOut};
@@ -98,7 +100,7 @@ Hotkey ParseHotkey(PCWSTR raw);
 COLORREF ParseBorderColor(PCWSTR raw);
 MenuBarMode ParseMenuBarMode(PCWSTR raw);
 int ParseCorners(PCWSTR raw);
-bool ParseDragTranslucency(PCWSTR raw);
+DragTranslucency ParseDragTranslucency(PCWSTR raw);
 int ClampedSetting(int value, int fallback, int low, int high);
 void LoadSettings();
 
@@ -215,7 +217,7 @@ bool HandleLeftButtonUp();
 bool IsDragFading(HWND hwnd);
 BYTE DragAlphaFor(BYTE baseAlpha, int opacityPercent);
 BYTE FadeAlphaAt(BYTE from, BYTE to, int durationMs, int elapsedMs);
-void BeginDragFade(HWND root);
+void BeginDragFade(HWND root, WPARAM kind);
 void EndDragFade(HWND hwnd);
 
 ////////////////////////////////////////////////////////////////////////////////
