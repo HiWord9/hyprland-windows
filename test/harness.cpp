@@ -150,6 +150,11 @@ static int g_clientClicksSeen;
 // this one is inside the modal loop for as long as the drag lasts.
 static std::atomic<bool> g_fadeSawLayered;
 static std::atomic<int> g_fadeMinAlpha;
+// An application that does work of its own before DefWindowProc gets around
+// to starting the loop, which is every application with anything to do. The
+// release that ends a resize can be on its way during that gap, and the test
+// window can stand in for such an application by waiting here.
+static std::atomic<int> g_sizeCommandDelayMs;
 
 static LRESULT CALLBACK TestWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
@@ -162,6 +167,24 @@ static LRESULT CALLBACK TestWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             break;
         case WM_MOUSEMOVE:
             g_mouseMovesSeen++;
+            break;
+        case WM_SYSCOMMAND:
+            if ((wp & 0xFFF0) == SC_SIZE && g_sizeCommandDelayMs > 0) {
+                // Pumped, not just waited: an application that gets around to
+                // its own queue here - a nested loop, a COM call, DoEvents -
+                // retrieves the release that was posted for the loop that has
+                // not started yet, and the mod then swallows it as its own.
+                DWORD end = GetTickCount() + g_sizeCommandDelayMs;
+                while ((int)(end - GetTickCount()) > 0) {
+                    MSG m;
+                    while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) {
+                        ProcessRetrievedMessage(&m);
+                        TranslateMessage(&m);
+                        DispatchMessageW(&m);
+                    }
+                    Sleep(5);
+                }
+            }
             break;
         case WM_LBUTTONDOWN:
         case WM_LBUTTONDBLCLK:
@@ -802,6 +825,63 @@ static void DragWith(bool right, HWND hwnd, POINT start, POINT delta,
     g_swallowButtonUp[0] = g_swallowButtonUp[1] = false;
 }
 
+// Starts a resize and lets the button go straight away, which is the case
+// where the release can beat the loop it is supposed to end. Returns false if
+// the loop had to be broken from outside - the loop was still running, with
+// no button held, two seconds after the release.
+static bool ResizeAndReleaseAtOnce(HWND hwnd, POINT start, DWORD holdMs) {
+    // With the window standing in for an application that is busy for a
+    // moment before the loop starts - without that, the release is never
+    // early enough for the race to happen at all.
+    g_sizeCommandDelayMs = 60;
+    SetCursorPos(start.x, start.y);
+    Sleep(50);
+    SendMouse(MOUSEEVENTF_RIGHTDOWN);
+    Sleep(20);
+    MSG down;
+    PeekMessageW(&down, nullptr, WM_RBUTTONDOWN, WM_RBUTTONDOWN, PM_REMOVE);
+    g_swallowButtonUp[1] = true;  // what the consumed press leaves behind
+    RequestDrag(hwnd, kDragResize, start);
+
+    int enter0 = g_sizeMoveEnter, exit0 = g_sizeMoveExit;
+    std::atomic<bool> rescued{false};
+    std::thread breaker([&] {
+        Sleep(holdMs);
+        SendMouse(MOUSEEVENTF_RIGHTUP);
+        DWORD deadline = GetTickCount() + 2000;
+        while (g_sizeMoveExit == exit0 && (int)(deadline - GetTickCount()) > 0) {
+            Sleep(20);
+        }
+        if (g_sizeMoveExit == exit0 && g_sizeMoveEnter != enter0) {
+            // Stuck to the cursor. End it the way a click would, so the rest
+            // of the tests can still run.
+            rescued = true;
+            POINT pt;
+            GetCursorPos(&pt);
+            PostMessageW(hwnd, WM_LBUTTONUP, 0, MAKELPARAM(pt.x, pt.y));
+        }
+    });
+
+    DWORD t0 = GetTickCount();
+    for (;;) {
+        PumpRaw(50);
+        DWORD spent = GetTickCount() - t0;
+        bool entered = g_sizeMoveEnter != enter0;
+        if (g_sizeMoveExit != exit0 || spent > 4000 ||
+            (!entered && spent > 600)) {
+            break;
+        }
+    }
+    breaker.join();
+    PumpRaw(150);
+    g_sizeCommandDelayMs = 0;
+    printf("  loop entered=%d, had to be broken=%d\n",
+           g_sizeMoveEnter != enter0, (int)rescued);
+    g_swallowButtonUp[0] = g_swallowButtonUp[1] = false;
+    g_pendingRelease = false;
+    return !rescued;
+}
+
 static void TestMoveResize() {
     printf("\n== move / resize loops ==\n");
 
@@ -916,6 +996,17 @@ static void TestMoveResize() {
     CHECK(!(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_LAYERED),
           "a cancelled drag hands the window back too");
 
+    // Let go of the button the instant the resize starts. The release can
+    // then be on its way before the loop exists, and a loop that never gets
+    // one keeps following the cursor with no button held at all.
+    RECT rq;
+    GetWindowRect(hwnd, &rq);
+    POINT corner{rq.right - 50, rq.bottom - 50};
+    for (DWORD holdMs : {(DWORD)0, (DWORD)30, (DWORD)80}) {
+        CHECK(ResizeAndReleaseAtOnce(hwnd, corner, holdMs),
+              "a resize let go of after %lu ms ends on its own", holdMs);
+    }
+
     // Requests that must not start anything. A move needs the button to
     // still be down (nothing is held here), and a fixed-size window has
     // nothing to resize - in which case no synthetic button may be left held
@@ -963,6 +1054,53 @@ static void TestMoveResize() {
 
     SetCursorPos(savedCursor.x, savedCursor.y);
     RemoveMessageHooks();
+    DestroyWindow(hwnd);
+    Pump(100);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// The release that ends a resize
+
+static void TestResizeRelease() {
+    printf("\n== resize release ==\n");
+
+    HWND hwnd = CreateTestWindow(L"Hypr release test", false, 260, 200);
+
+    // The watcher thread with no loop to end and no button held - which is
+    // what a resize looks like for the moment between the request and the
+    // loop it starts. A release posted in that moment is lost, or is
+    // retrieved by the application and swallowed as the mod's own, and the
+    // loop is then left following the cursor with nothing to stop it.
+    int refs0 = g_modRefCount;
+    CHECK(StartResizeRelease(hwnd), "the resize watcher starts");
+    MSG up;
+    bool posted = false;
+    for (int i = 0; i < 12 && !posted; i++) {
+        Sleep(25);
+        posted = PeekMessageW(&up, hwnd, WM_LBUTTONUP, WM_LBUTTONUP,
+                              PM_REMOVE) != 0;
+    }
+    CHECK(!posted, "and posts no release while no loop is running");
+
+    // It gives up after kMoveSizeStartWaitMs and lets the image go.
+    for (int i = 0; i < 40 && g_modRefCount > refs0; i++) {
+        Sleep(50);
+    }
+    CHECK(g_modRefCount == refs0, "and lets go of the mod when it gives up");
+    CHECK(!PeekMessageW(&up, hwnd, WM_LBUTTONUP, WM_LBUTTONUP, PM_REMOVE),
+          "with nothing posted on the way out either");
+
+    // A flag left over from a resize whose loop never started must not eat
+    // the release of the next click.
+    g_pendingRelease = true;
+    POINT pt{300, 240};
+    MSG down{hwnd, WM_LBUTTONDOWN, 0, 0, 0, pt};
+    ProcessRetrievedMessage(&down);
+    CHECK(!g_pendingRelease, "a fresh press clears a stale pending release");
+    MSG release{hwnd, WM_LBUTTONUP, 0, 0, 0, pt};
+    ProcessRetrievedMessage(&release);
+    CHECK(release.message == WM_LBUTTONUP, "so the release passes through");
+
     DestroyWindow(hwnd);
     Pump(100);
 }
@@ -1135,6 +1273,7 @@ int main(int argc, char** argv) {
     TestFramelessGeometry(true, MenuBarMode::KeepMenu);
     TestMessageHook();
     TestAutoHide();
+    TestResizeRelease();
     TestDragFade();
     if (!noInput) {
         TestMoveResize();

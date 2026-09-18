@@ -34,12 +34,16 @@ bool IsDragModifierDown() {
            0;
 }
 
-// Whether a system move/resize loop is running on this thread. The loop pumps
-// messages, so the mod sees them while it runs.
-bool IsInMoveSizeLoop() {
+// Whether a system move/resize loop is running on a thread.
+bool IsThreadInMoveSizeLoop(DWORD threadId) {
     GUITHREADINFO info{sizeof(info)};
-    return GetGUIThreadInfo(GetCurrentThreadId(), &info) &&
-           (info.flags & GUI_INMOVESIZE);
+    return GetGUIThreadInfo(threadId, &info) && (info.flags & GUI_INMOVESIZE);
+}
+
+// The same for this thread. The loop pumps messages, so the mod sees them
+// while it runs.
+bool IsInMoveSizeLoop() {
+    return IsThreadInMoveSizeLoop(GetCurrentThreadId());
 }
 
 int PhysicalButtonVk(bool right) {
@@ -115,30 +119,74 @@ bool StartMove(HWND root, POINT pt, MSG* msg) {
 // reflow live and native menu bars don't flicker.
 //
 // The loop ends when the left button is released, which is never going to
-// happen here - the user releases the right one - so a thread waits for that
-// and posts the release the loop is waiting for.
+// happen here - the user releases the right one - so a thread waits for the
+// loop to be running, then for the right button, and then posts the release
+// the loop is waiting for.
 
 // Set while a resize of ours is running: the release below is the mod's, and
 // if the loop has already ended without it - cancelled with Esc - it is the
 // mod's to swallow as well.
 thread_local bool g_pendingRelease;
 
+constexpr int kResizePollMs = 8;
+// A second release 60 ms later is not something anyone can see; a resize that
+// stays glued to the cursor is.
+constexpr int kReleaseAttempts = 10;
+constexpr int kReleaseRetryMs = 60;
+
 struct ResizeRelease {
     HWND root;
+    DWORD threadId;  // the one whose loop this release is for
     int rightVk;
 };
+
+void PostResizeRelease(const ResizeRelease& release) {
+    POINT pt;
+    GetCursorPos(&pt);
+    PostMessageW(release.root, WM_LBUTTONUP, 0, MAKELPARAM(pt.x, pt.y));
+}
 
 DWORD WINAPI ResizeReleaseThread(LPVOID param) {
     {
         std::unique_ptr<ResizeRelease> release(
             static_cast<ResizeRelease*>(param));
-        while ((GetAsyncKeyState(release->rightVk) & 0x8000) &&
-               !g_uninitializing) {
-            Sleep(8);
+
+        // The loop has to be running before a release is any use. One posted
+        // while the loop is still starting up is lost - or is retrieved by
+        // the application first, which swallows it as the mod's own - and the
+        // loop is then left following the cursor with nothing to end it. A
+        // button let go of in the meantime is not: the wait below sees it.
+        for (int waited = 0; waited < kMoveSizeStartWaitMs;
+             waited += kResizePollMs) {
+            if (IsThreadInMoveSizeLoop(release->threadId) || g_uninitializing) {
+                break;
+            }
+            Sleep(kResizePollMs);
         }
-        POINT pt;
-        GetCursorPos(&pt);
-        PostMessageW(release->root, WM_LBUTTONUP, 0, MAKELPARAM(pt.x, pt.y));
+
+        // Then the button, and the loop, whichever ends first: one cancelled
+        // with Esc has already put the window back and wants no release. The
+        // mod being on its way out counts as the button being let go of - a
+        // loop nobody is left to post to would never end.
+        while (IsThreadInMoveSizeLoop(release->threadId) &&
+               (GetAsyncKeyState(release->rightVk) & 0x8000) &&
+               !g_uninitializing) {
+            Sleep(kResizePollMs);
+        }
+
+        // The release is then offered until the loop takes it. Once is
+        // normally enough, and more is what keeps a loop that did not get it
+        // from following the cursor with no button held: the application can
+        // have retrieved it first, which the mod answers for by swallowing
+        // it. The loop is checked again before every attempt, so at most one
+        // release can outlive it, which is the one g_pendingRelease is for.
+        for (int attempt = 0; attempt < kReleaseAttempts; attempt++) {
+            if (!IsThreadInMoveSizeLoop(release->threadId)) {
+                break;
+            }
+            PostResizeRelease(*release);
+            Sleep(kReleaseRetryMs);
+        }
     }
     g_modRefCount--;  // the last thing this thread does in the mod's image
     return 0;
@@ -148,7 +196,9 @@ DWORD WINAPI ResizeReleaseThread(LPVOID param) {
 // frame of the mod's on the stack of the window's thread. The reference it
 // holds is what keeps the image around for as long as it runs.
 bool StartResizeRelease(HWND root) {
-    auto* release = new ResizeRelease{root, PhysicalButtonVk(true)};
+    auto* release = new ResizeRelease{root,
+                                      GetWindowThreadProcessId(root, nullptr),
+                                      PhysicalButtonVk(true)};
     g_modRefCount++;
     HANDLE thread =
         CreateThread(nullptr, 0, ResizeReleaseThread, release, 0, nullptr);
@@ -222,8 +272,11 @@ thread_local bool g_swallowButtonUp[2];  // [0] = left, [1] = right
 bool HandleModifierButtonDown(const MSG* msg, bool right) {
     // A fresh press means a release we were still waiting to swallow is not
     // coming: a drag cancelled with Esc can leave the cursor outside the
-    // window it started on, and the release then goes somewhere else.
+    // window it started on, and the release then goes somewhere else. Same
+    // for a resize whose loop never started, which leaves nothing to post
+    // the release the flag below is waiting for.
     g_swallowButtonUp[right] = false;
+    g_pendingRelease = false;
 
     // A drag is already running on this thread: its loop pumps messages, so
     // presses during one arrive here too.

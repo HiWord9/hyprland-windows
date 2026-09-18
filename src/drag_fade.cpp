@@ -36,7 +36,6 @@ struct DragFadeWork {
 
 constexpr DWORD kFadeStepMs = 8;       // ~120 Hz, about as fine as Sleep gets
 constexpr DWORD kFadeHoldStepMs = 16;  // while waiting for the drag to end
-constexpr int kLoopStartWaitMs = 500;  // the request is answered by a post
 
 bool IsDragFading(HWND hwnd) {
     std::lock_guard<std::mutex> lock(g_fadeMutex);
@@ -70,10 +69,8 @@ void SetFadeAlpha(const DragFadeWork& work, BYTE alpha) {
 
 // Whether the loop this fade belongs to is still running.
 bool DragStillRunning(const DragFadeWork& work) {
-    GUITHREADINFO info{sizeof(info)};
     return !g_uninitializing && IsWindow(work.root) &&
-           GetGUIThreadInfo(work.threadId, &info) &&
-           (info.flags & GUI_INMOVESIZE);
+           IsThreadInMoveSizeLoop(work.threadId);
 }
 
 // Walks the alpha from one value to the other and returns where it got to:
@@ -104,7 +101,8 @@ BYTE FadeOver(const DragFadeWork& work,
 void RunDragFade(const DragFadeWork& work) {
     // The request that starts the loop is posted, so when the fade begins the
     // loop is a moment away rather than already running.
-    for (int waited = 0; waited < kLoopStartWaitMs && !DragStillRunning(work);
+    for (int waited = 0;
+         waited < kMoveSizeStartWaitMs && !DragStillRunning(work);
          waited += (int)kFadeStepMs) {
         Sleep(kFadeStepMs);
     }
