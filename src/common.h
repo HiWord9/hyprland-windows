@@ -193,9 +193,9 @@ enum DragKind : WPARAM {
     kDragUnfade = 2,
 };
 
-// How long the threads that watch a drag wait for its loop to start. The
-// request that starts it is posted, so the loop is a moment away - and
-// nothing either of them does is any use before it is running.
+// How long the thread that ends a resize waits for its loop to start. The
+// request that starts it is posted, so the loop is a moment away - and the
+// release it posts is no use at all before the loop is running.
 constexpr int kMoveSizeStartWaitMs = 500;
 
 bool IsDragModifierDown();

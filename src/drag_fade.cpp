@@ -28,10 +28,12 @@ std::unordered_map<HWND, DragFade> g_fades;  // windows being dragged right now
 struct DragFadeWork {
     HWND root;
     DWORD threadId;  // whose move/size loop the fade follows
+    int buttonVk;    // the physical button that holds this drag
     DragFade fade;
     BYTE target;
     int fadeIn;
     int fadeOut;
+    bool loopSeen = false;  // the loop has been seen running at least once
 };
 
 constexpr DWORD kFadeStepMs = 8;       // ~120 Hz, about as fine as Sleep gets
@@ -67,16 +69,29 @@ void SetFadeAlpha(const DragFadeWork& work, BYTE alpha) {
                                work.fade.baseFlags | LWA_ALPHA);
 }
 
-// Whether the loop this fade belongs to is still running.
-bool DragStillRunning(const DragFadeWork& work) {
-    return !g_uninitializing && IsWindow(work.root) &&
-           IsThreadInMoveSizeLoop(work.threadId);
+// Whether the drag is still going. The loop is not what says so on its own: a
+// move loop does not count as one until the cursor has moved far enough to be
+// a drag, so before that there is nothing to see but the button - and a loop
+// that has been running and is gone means the drag is over (cancelled with
+// Esc, say) even though the button is still held.
+bool DragStillHeld(DragFadeWork& work) {
+    if (g_uninitializing || !IsWindow(work.root)) {
+        return false;
+    }
+    if (IsThreadInMoveSizeLoop(work.threadId)) {
+        work.loopSeen = true;
+        return true;
+    }
+    if (work.loopSeen) {
+        return false;
+    }
+    return (GetAsyncKeyState(work.buttonVk) & 0x8000) != 0;
 }
 
 // Walks the alpha from one value to the other and returns where it got to:
 // `to`, unless `whileDragging` and the drag ended on the way - the fade back
 // then starts from wherever the window was instead of jumping.
-BYTE FadeOver(const DragFadeWork& work,
+BYTE FadeOver(DragFadeWork& work,
               BYTE from,
               BYTE to,
               int durationMs,
@@ -85,7 +100,7 @@ BYTE FadeOver(const DragFadeWork& work,
     DWORD start = GetTickCount();
     int elapsed = 0;
     while (elapsed < durationMs && !g_uninitializing &&
-           (!whileDragging || DragStillRunning(work))) {
+           (!whileDragging || DragStillHeld(work))) {
         alpha = FadeAlphaAt(from, to, durationMs, elapsed);
         SetFadeAlpha(work, alpha);
         Sleep(kFadeStepMs);
@@ -98,21 +113,14 @@ BYTE FadeOver(const DragFadeWork& work,
     return alpha;
 }
 
-void RunDragFade(const DragFadeWork& work) {
-    // The request that starts the loop is posted, so when the fade begins the
-    // loop is a moment away rather than already running.
-    for (int waited = 0;
-         waited < kMoveSizeStartWaitMs && !DragStillRunning(work);
-         waited += (int)kFadeStepMs) {
-        Sleep(kFadeStepMs);
-    }
-
-    BYTE alpha = work.fade.baseAlpha;
-    if (DragStillRunning(work)) {
-        alpha = FadeOver(work, alpha, work.target, work.fadeIn, true);
-        while (DragStillRunning(work)) {
-            Sleep(kFadeHoldStepMs);
-        }
+void RunDragFade(DragFadeWork& work) {
+    // Straight into the fade, with nothing waited for first: the window dims
+    // when the button goes down, which for a move is well before the loop
+    // that moves it has anything to show.
+    BYTE alpha =
+        FadeOver(work, work.fade.baseAlpha, work.target, work.fadeIn, true);
+    while (DragStillHeld(work)) {
+        Sleep(kFadeHoldStepMs);
     }
     // Snapped back rather than faded when the mod is on its way out: the
     // unload is waiting for this thread to be done.
@@ -192,6 +200,7 @@ void BeginDragFade(HWND root, WPARAM kind) {
 
     auto* work = new DragFadeWork{root,
                                   GetWindowThreadProcessId(root, nullptr),
+                                  PhysicalButtonVk(kind == kDragResize),
                                   fade,
                                   target,
                                   g_settings.dragFadeIn,

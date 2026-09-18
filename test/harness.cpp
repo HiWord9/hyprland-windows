@@ -1007,6 +1007,40 @@ static void TestMoveResize() {
               "a resize let go of after %lu ms ends on its own", holdMs);
     }
 
+    // A window dims while the button is held, before it has moved at all: a
+    // move loop does not count as a move/size loop until the cursor has gone
+    // far enough to be a drag, and the fade cannot wait for that.
+    SetCursorPos(rq.left + 140, rq.top + 140);
+    PumpRaw(50);
+    SendMouse(MOUSEEVENTF_LEFTDOWN);
+    PumpRaw(30);
+    BeginDragFade(hwnd, kDragMove);
+    CHECK(IsDragFading(hwnd), "a move arms the fade");
+    BYTE target = DragAlphaFor(255, g_settings.dragOpacity);
+    BYTE dimmed = 255;
+    bool sawLoop = false;
+    for (int i = 0; i < 60 && dimmed > target; i++) {
+        PumpRaw(20);
+        sawLoop = sawLoop || IsInMoveSizeLoop();
+        COLORREF k;
+        BYTE a;
+        DWORD f;
+        if (GetLayeredWindowAttributes(hwnd, &k, &a, &f) && (f & LWA_ALPHA)) {
+            dimmed = a;
+        }
+    }
+    CHECK(!sawLoop, "with no move/size loop running at any point");
+    CHECK(dimmed <= target, "the window dims on the press alone (alpha %d)",
+          (int)dimmed);
+
+    SendMouse(MOUSEEVENTF_LEFTUP);
+    for (int i = 0; i < 40 && IsDragFading(hwnd); i++) {
+        PumpRaw(50);
+    }
+    CHECK(!IsDragFading(hwnd), "and comes back when the button is let go of");
+    CHECK(!(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_LAYERED),
+          "with the layered style off again");
+
     // Requests that must not start anything. A move needs the button to
     // still be down (nothing is held here), and a fixed-size window has
     // nothing to resize - in which case no synthetic button may be left held
@@ -1153,16 +1187,15 @@ static void TestDragFade() {
     CHECK(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_LAYERED,
           "and makes the window layered");
     CHECK(GetLayeredWindowAttributes(hwnd, &key, &alpha, &flags) &&
-              alpha == 255,
-          "still opaque until the loop it follows starts (alpha %d)",
-          (int)alpha);
+              (flags & LWA_ALPHA),
+          "with an alpha of its own to animate (0x%lX)", flags);
 
-    // No loop ever starts here, so the fade gives up waiting and asks the
-    // window's thread - this one - to take the style back off.
+    // No button is held here, so the drag is over before it began and the
+    // window's thread - this one - is asked to take the style back off.
     for (int i = 0; i < 20 && IsDragFading(hwnd); i++) {
         Pump(100);
     }
-    CHECK(!IsDragFading(hwnd), "a loop that never starts ends the fade");
+    CHECK(!IsDragFading(hwnd), "a drag with no button held ends the fade");
     CHECK(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) == ex0,
           "and leaves the window's styles as they were");
     DestroyWindow(hwnd);
