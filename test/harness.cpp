@@ -146,6 +146,10 @@ static int g_mouseMovesSeen;
 // has to stay zero: neither the press the mod consumes nor the synthetic one
 // it drives the resize loop with may reach the app.
 static int g_clientClicksSeen;
+// The translucency of a window being dragged, sampled from another thread:
+// this one is inside the modal loop for as long as the drag lasts.
+static std::atomic<bool> g_fadeSawLayered;
+static std::atomic<int> g_fadeMinAlpha;
 
 static LRESULT CALLBACK TestWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
@@ -334,6 +338,31 @@ static void TestParsers() {
           "corner bottom-left");
     CHECK(ResizeEdgeForPoint(rc, {280, 280}) == WMSZ_BOTTOMRIGHT,
           "corner bottom-right");
+
+    CHECK(ParseDragTranslucency(L""), "translucency defaults to the fade");
+    CHECK(ParseDragTranslucency(L"fade"), "translucency fade");
+    CHECK(!ParseDragTranslucency(L"opaque"), "translucency opaque");
+    CHECK(!ParseDragTranslucency(L" OFF "), "translucency off");
+
+    CHECK(ClampedSetting(0, 85, 10, 100) == 85,
+          "a setting that was never written means the default");
+    CHECK(ClampedSetting(50, 85, 10, 100) == 50, "a setting in range is kept");
+    CHECK(ClampedSetting(400, 85, 10, 100) == 100, "a setting is clamped high");
+    CHECK(ClampedSetting(3, 85, 10, 100) == 10, "a setting is clamped low");
+
+    CHECK(DragAlphaFor(255, 85) == 216, "85%% of an opaque window (%d)",
+          DragAlphaFor(255, 85));
+    CHECK(DragAlphaFor(200, 50) == 100, "half of an already translucent one");
+    CHECK(DragAlphaFor(255, 100) == 255, "100%% changes nothing");
+
+    CHECK(FadeAlphaAt(255, 200, 100, 0) == 255, "a fade starts where it was");
+    CHECK(FadeAlphaAt(255, 200, 100, 100) == 200, "and ends where it goes");
+    CHECK(FadeAlphaAt(255, 200, 100, 150) == 200, "past its end it holds");
+    CHECK(FadeAlphaAt(255, 200, 0, 0) == 200, "a zero-length fade is instant");
+    BYTE half = FadeAlphaAt(255, 200, 100, 50);
+    CHECK(half < 255 && half > 200, "halfway is in between (%d)", half);
+    CHECK(FadeAlphaAt(255, 200, 100, 25) > FadeAlphaAt(255, 200, 100, 75),
+          "and a fade only goes one way");
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -699,6 +728,25 @@ static void DragWith(bool right, HWND hwnd, POINT start, POINT delta,
     }
     RequestDrag(hwnd, kind, start);
 
+    g_fadeSawLayered = false;
+    g_fadeMinAlpha = 255;
+    std::atomic<bool> sampling{true};
+    std::thread sampler([&] {
+        while (sampling) {
+            if (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_LAYERED) {
+                g_fadeSawLayered = true;
+                COLORREF key;
+                BYTE alpha;
+                DWORD flags;
+                if (GetLayeredWindowAttributes(hwnd, &key, &alpha, &flags) &&
+                    (flags & LWA_ALPHA) && alpha < g_fadeMinAlpha) {
+                    g_fadeMinAlpha = alpha;
+                }
+            }
+            Sleep(5);
+        }
+    });
+
     std::thread mover([=] {
         Sleep(200);
         POINT end{start.x + delta.x, start.y + delta.y};
@@ -726,6 +774,8 @@ static void DragWith(bool right, HWND hwnd, POINT start, POINT delta,
     }
     DWORD elapsed = GetTickCount() - t0;
     mover.join();
+    sampling = false;
+    sampler.join();
     printf("  modal loop ran for %lu ms\n", (unsigned long)elapsed);
     CHECK(elapsed >= 150, "the loop blocked until the button was released");
     CHECK(g_sizeMoveEnter == enter0 + 1 && g_sizeMoveExit == exit0 + 1,
@@ -780,6 +830,17 @@ static void TestMoveResize() {
           after.top - before.top);
     CHECK(after.right - after.left == before.right - before.left,
           "size unchanged by move");
+
+    // Translucency while it was being dragged, and the window handed back
+    // exactly as it was once the drag is over.
+    CHECK(g_fadeSawLayered, "the dragged window was made layered");
+    CHECK(g_fadeMinAlpha <= DragAlphaFor(255, g_settings.dragOpacity),
+          "and faded to the configured opacity (alpha %d)",
+          (int)g_fadeMinAlpha);
+    PumpRaw(400);
+    CHECK(!(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_LAYERED),
+          "the layered style is gone once the drag ends");
+    CHECK(!IsDragFading(hwnd), "and the window is no longer tracked");
 
     // Resize from the bottom-right quadrant, starting well inside the window.
     RECT r0 = after;
@@ -845,6 +906,9 @@ static void TestMoveResize() {
     PumpRaw(100);
     GetWindowRect(hwnd, &r6);
     CHECK(EqualRect(&r6, &r5), "Esc restored the original size");
+    PumpRaw(400);
+    CHECK(!(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_LAYERED),
+          "a cancelled drag hands the window back too");
 
     // Requests that must not start anything. A move needs the button to
     // still be down (nothing is held here), and a fixed-size window has
@@ -855,6 +919,7 @@ static void TestMoveResize() {
     PumpRaw(300);
     CHECK(g_sizeMoveEnter == enter0,
           "a move request with the button already up starts no loop");
+    CHECK(!IsDragFading(hwnd), "and fades nothing");
 
     LONG_PTR st = GetWindowLongPtrW(hwnd, GWL_STYLE);
     SetWindowLongPtrW(hwnd, GWL_STYLE, st & ~WS_THICKFRAME);
@@ -897,6 +962,126 @@ static void TestMoveResize() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// Translucency while dragging, without a drag: what the fade does to a window
+// on its own, including the windows it has to leave alone.
+
+// Makes a window composite itself per pixel, the way an app that draws its
+// own transparency does, so the fade has something real to stay out of.
+static void PaintPerPixel(HWND hwnd) {
+    const int side = 8;
+    HDC screen = GetDC(nullptr);
+    HDC mem = CreateCompatibleDC(screen);
+    BITMAPINFO bi{};
+    bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+    bi.bmiHeader.biWidth = side;
+    bi.bmiHeader.biHeight = side;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr;
+    HBITMAP bmp =
+        CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    memset(bits, 0x80, side * side * 4);  // premultiplied, half transparent
+    HGDIOBJ old = SelectObject(mem, bmp);
+    POINT src{0, 0};
+    SIZE size{side, side};
+    BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+    CHECK(UpdateLayeredWindow(hwnd, screen, nullptr, &size, mem, &src, 0,
+                              &blend, ULW_ALPHA),
+          "the window paints its own per-pixel transparency");
+    SelectObject(mem, old);
+    DeleteObject(bmp);
+    DeleteDC(mem);
+    ReleaseDC(nullptr, screen);
+}
+
+static void TestDragFade() {
+    printf("\n== drag translucency ==\n");
+
+    COLORREF key = 0;
+    BYTE alpha = 0;
+    DWORD flags = 0;
+
+    HWND hwnd = CreateTestWindow(L"Hypr fade test", false, 200, 200);
+    LONG_PTR ex0 = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    BeginDragFade(hwnd);
+    CHECK(IsDragFading(hwnd), "a drag arms the fade");
+    CHECK(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_LAYERED,
+          "and makes the window layered");
+    CHECK(GetLayeredWindowAttributes(hwnd, &key, &alpha, &flags) &&
+              alpha == 255,
+          "still opaque until the loop it follows starts (alpha %d)",
+          (int)alpha);
+
+    // No loop ever starts here, so the fade gives up waiting and asks the
+    // window's thread - this one - to take the style back off.
+    for (int i = 0; i < 20 && IsDragFading(hwnd); i++) {
+        Pump(100);
+    }
+    CHECK(!IsDragFading(hwnd), "a loop that never starts ends the fade");
+    CHECK(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) == ex0,
+          "and leaves the window's styles as they were");
+    DestroyWindow(hwnd);
+    Pump(100);
+
+    // A window that is already translucent keeps its own alpha and its own
+    // layered style; the fade is relative to what it had.
+    HWND translucent = CreateTestWindow(L"Hypr fade test 2", false, 240, 240);
+    SetWindowLongPtrW(
+        translucent, GWL_EXSTYLE,
+        GetWindowLongPtrW(translucent, GWL_EXSTYLE) | WS_EX_LAYERED);
+    SetLayeredWindowAttributes(translucent, 0, 180, LWA_ALPHA);
+    Pump(100);
+    BeginDragFade(translucent);
+    CHECK(IsDragFading(translucent), "an already translucent window fades too");
+    CHECK(DragAlphaFor(180, g_settings.dragOpacity) < 180,
+          "to less than it was");
+    for (int i = 0; i < 20 && IsDragFading(translucent); i++) {
+        Pump(100);
+    }
+    CHECK(GetLayeredWindowAttributes(translucent, &key, &alpha, &flags) &&
+              alpha == 180,
+          "and gets its own alpha back afterwards (%d)", (int)alpha);
+    CHECK(GetWindowLongPtrW(translucent, GWL_EXSTYLE) & WS_EX_LAYERED,
+          "with the layered style it brought itself left alone");
+    DestroyWindow(translucent);
+    Pump(100);
+
+    // A window that paints its own transparency is not touched at all: a flat
+    // alpha replaces what it drew, and makes its next UpdateLayeredWindow
+    // fail on top of that.
+    HWND perPixel = CreateTestWindow(L"Hypr fade test 3", false, 280, 280);
+    SetWindowLongPtrW(perPixel, GWL_EXSTYLE,
+                      GetWindowLongPtrW(perPixel, GWL_EXSTYLE) | WS_EX_LAYERED);
+    CHECK(GetLayeredWindowAttributes(perPixel, &key, &alpha, &flags) && !flags,
+          "a freshly layered window reports no attributes set (0x%lX)", flags);
+    BeginDragFade(perPixel);
+    CHECK(!IsDragFading(perPixel),
+          "which the fade stays out of - the app may be about to paint it");
+    PaintPerPixel(perPixel);
+    CHECK(!GetLayeredWindowAttributes(perPixel, &key, &alpha, &flags),
+          "and once it has, there is nothing to read at all");
+    BeginDragFade(perPixel);
+    CHECK(!IsDragFading(perPixel), "which the fade stays out of as well");
+    DestroyWindow(perPixel);
+    Pump(100);
+
+    HWND off = CreateTestWindow(L"Hypr fade test 4", false, 320, 320);
+    g_settings.dragTranslucency = false;
+    BeginDragFade(off);
+    CHECK(!IsDragFading(off), "the setting turns the fade off");
+    g_settings.dragTranslucency = true;
+    g_settings.dragOpacity = 100;
+    BeginDragFade(off);
+    CHECK(!IsDragFading(off), "and so does an opacity of 100%%");
+    CHECK(!(GetWindowLongPtrW(off, GWL_EXSTYLE) & WS_EX_LAYERED),
+          "neither of them touches the window");
+    g_settings.dragOpacity = kDefaultDragOpacity;
+    DestroyWindow(off);
+    Pump(100);
+}
+
+////////////////////////////////////////////////////////////////////////////////
 
 int main(int argc, char** argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
@@ -930,6 +1115,7 @@ int main(int argc, char** argv) {
     TestFramelessGeometry(true, MenuBarMode::KeepMenu);
     TestMessageHook();
     TestAutoHide();
+    TestDragFade();
     if (!noInput) {
         TestMoveResize();
     }

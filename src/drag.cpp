@@ -195,13 +195,22 @@ bool HandleDragRequest(MSG* msg) {
     HWND root = msg->hwnd;
     POINT pt{GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam)};
 
+    if (msg->wParam == kDragUnfade) {
+        EndDragFade(root);
+        return false;  // ours, and there is nothing to dispatch
+    }
+
     // Checked again here: the request came from another thread, possibly in
     // another process, so the window may no longer be what it was.
     if (g_uninitializing || !IsFrameWindow(root)) {
         return false;
     }
-    return msg->wParam == kDragResize ? StartResize(root, pt, msg)
-                                      : StartMove(root, pt, msg);
+    bool started = msg->wParam == kDragResize ? StartResize(root, pt, msg)
+                                              : StartMove(root, pt, msg);
+    if (started) {
+        BeginDragFade(root);
+    }
+    return started;
 }
 
 // Per-thread: a button-up to swallow because we swallowed its button-down.

@@ -25,10 +25,11 @@ Window handling the way Hyprland does it, on Windows.
 
 Moving and resizing feel like the real thing: windows still snap to the screen
 edges, dragging one to the top still offers the Windows 11 snap layouts, and
-`Esc` cancels a drag in progress.
+`Esc` cancels a drag in progress. A window you are dragging fades to slightly
+translucent while you hold it, the way a Hyprland window does.
 
-Everything is configurable in the settings - the hotkey, the modifier key, and
-how much of the frame goes away with the title bar.
+Everything is configurable in the settings - the hotkey, the modifier key, the
+translucency, and how much of the frame goes away with the title bar.
 
 ## Good to know
 
@@ -57,6 +58,26 @@ how much of the frame goes away with the title bar.
   $options:
   - win: Win (Super)
   - alt: Alt
+- dragTranslucency: fade
+  $name: Translucency while dragging
+  $description: >-
+    Fade a window to translucent while it is being moved or resized, the way
+    Hyprland does
+  $options:
+  - fade: Fade it out, and back in when the drag ends
+  - opaque: Keep it opaque
+- dragOpacity: 85
+  $name: Opacity while dragging
+  $description: >-
+    How opaque the window stays during a drag, in percent. 100 is fully
+    opaque, 10 is barely there.
+- dragFadeIn: 120
+  $name: Fade-in time
+  $description: How long the window takes to get there, in milliseconds
+- dragFadeOut: 60
+  $name: Fade-out time
+  $description: >-
+    How long it takes to come back once the drag ends, in milliseconds
 - topEdgeResize: false
   $name: Resize from the top edge
   $description: >-

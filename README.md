@@ -12,10 +12,11 @@ a mod for [Windhawk](https://windhawk.net/).
 
 Moving and resizing feel like the real thing: windows still snap to the screen
 edges, dragging one to the top still offers the Windows 11 snap layouts, and
-`Esc` cancels a drag in progress.
+`Esc` cancels a drag in progress. A window you are dragging fades to slightly
+translucent while you hold it, the way a Hyprland window does.
 
-The hotkey, the modifier key and how much of the frame goes away with the title
-bar are all configurable in the mod's settings in Windhawk.
+The hotkey, the modifier key, the translucency and how much of the frame goes
+away with the title bar are all configurable in the mod's settings in Windhawk.
 
 ## Installing
 
@@ -52,6 +53,7 @@ and assembled into that single file:
 | `src/hotkey.cpp` | the title-bar hotkey |
 | `src/startmenu.cpp` | keeping the Start menu shut after a `Win` + drag |
 | `src/drag.cpp` | `Win` + mouse move and resize |
+| `src/drag_fade.cpp` | fading a window to translucent while it is dragged |
 | `src/hooks.cpp` | the hooked APIs (messages, window creation) |
 | `src/mod.cpp` | the Windhawk lifecycle entry points |
 | `tools/bundle.py` | assembles all of the above into `build/hyprland-windows.wh.cpp` |

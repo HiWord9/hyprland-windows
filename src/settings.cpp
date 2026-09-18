@@ -121,6 +121,19 @@ MenuBarMode ParseMenuBarMode(PCWSTR raw) {
     return MenuBarMode::Hide;
 }
 
+// Anything but "opaque" fades, so a setting Windhawk has never written out -
+// an empty string - means the fade is on, the way the settings say it is.
+bool ParseDragTranslucency(PCWSTR raw) {
+    std::wstring s = NormalizeSettingString(raw);
+    return s != L"OPAQUE" && s != L"OFF" && s != L"NONE";
+}
+
+// A setting Windhawk has never written out reads as zero, which is why zero
+// means "the documented default" rather than a value of its own.
+int ClampedSetting(int value, int fallback, int low, int high) {
+    return value <= 0 ? fallback : std::clamp(value, low, high);
+}
+
 int ParseCorners(PCWSTR raw) {
     std::wstring s = NormalizeSettingString(raw);
     if (s == L"ROUND") {
@@ -189,6 +202,17 @@ void LoadSettings() {
                                   : DragModifier::Win;
 
     g_settings.topEdgeResize = Wh_GetIntSetting(L"topEdgeResize") != 0;
+
+    WindhawkUtils::StringSetting translucency(
+        Wh_GetStringSetting(L"dragTranslucency"));
+    g_settings.dragTranslucency = ParseDragTranslucency(translucency);
+    g_settings.dragOpacity = ClampedSetting(Wh_GetIntSetting(L"dragOpacity"),
+                                            kDefaultDragOpacity, 10, 100);
+    g_settings.dragFadeIn = ClampedSetting(Wh_GetIntSetting(L"dragFadeIn"),
+                                           kDefaultDragFadeIn, 1, 2000);
+    g_settings.dragFadeOut = ClampedSetting(Wh_GetIntSetting(L"dragFadeOut"),
+                                            kDefaultDragFadeOut, 1, 2000);
+
     WindhawkUtils::StringSetting menuBar(Wh_GetStringSetting(L"menuBarWindows"));
     g_settings.menuBarMode = ParseMenuBarMode(menuBar);
     g_settings.hideByDefault = Wh_GetIntSetting(L"hideByDefault") != 0;
@@ -203,11 +227,13 @@ void LoadSettings() {
     g_settings.corners = ParseCorners(corners);
 
     Wh_Log(L"Settings: hotkey vk=0x%02X ctrl=%d alt=%d shift=%d win=%d, "
-           L"dragModifier=%s, topEdgeResize=%d, menuBar=%d, hideByDefault=%d",
+           L"dragModifier=%s, topEdgeResize=%d, menuBar=%d, hideByDefault=%d, "
+           L"dragTranslucency=%d, dragOpacity=%d",
            g_settings.hotkeyVk.load(), (int)g_settings.hotkeyCtrl,
            (int)g_settings.hotkeyAlt, (int)g_settings.hotkeyShift,
            (int)g_settings.hotkeyWin,
            g_settings.dragModifier == DragModifier::Alt ? L"alt" : L"win",
            (int)g_settings.topEdgeResize, (int)g_settings.menuBarMode.load(),
-           (int)g_settings.hideByDefault);
+           (int)g_settings.hideByDefault, (int)g_settings.dragTranslucency,
+           g_settings.dragOpacity.load());
 }

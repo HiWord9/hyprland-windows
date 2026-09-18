@@ -39,6 +39,7 @@ MODULES = [
     "hotkey.cpp",
     "startmenu.cpp",
     "drag.cpp",
+    "drag_fade.cpp",
     "hooks.cpp",
     "mod.cpp",
 ]

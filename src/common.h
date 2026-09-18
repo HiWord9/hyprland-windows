@@ -53,6 +53,13 @@ enum class MenuBarMode { Hide, KeepMenu, Skip };
 // Sentinel for "leave the DWM attribute alone" (not a valid DWM color value).
 constexpr COLORREF kColorUntouched = 0xFFFFFFFD;
 
+// The translucency of a dragged window, and how long it takes to get there
+// and back. Also what a setting Windhawk has never written out means, since
+// none of the three is usefully zero.
+constexpr int kDefaultDragOpacity = 85;
+constexpr int kDefaultDragFadeIn = 120;
+constexpr int kDefaultDragFadeOut = 60;
+
 struct Settings {
     std::atomic<UINT> hotkeyVk{0};
     std::atomic<bool> hotkeyCtrl{true};
@@ -61,6 +68,10 @@ struct Settings {
     std::atomic<bool> hotkeyWin{false};
     std::atomic<DragModifier> dragModifier{DragModifier::Win};
     std::atomic<bool> topEdgeResize{false};
+    std::atomic<bool> dragTranslucency{true};
+    std::atomic<int> dragOpacity{kDefaultDragOpacity};
+    std::atomic<int> dragFadeIn{kDefaultDragFadeIn};
+    std::atomic<int> dragFadeOut{kDefaultDragFadeOut};
     std::atomic<MenuBarMode> menuBarMode{MenuBarMode::Hide};
     std::atomic<bool> hideByDefault{false};
     std::atomic<COLORREF> borderActive{kColorUntouched};
@@ -87,6 +98,8 @@ Hotkey ParseHotkey(PCWSTR raw);
 COLORREF ParseBorderColor(PCWSTR raw);
 MenuBarMode ParseMenuBarMode(PCWSTR raw);
 int ParseCorners(PCWSTR raw);
+bool ParseDragTranslucency(PCWSTR raw);
+int ClampedSetting(int value, int fallback, int low, int high);
 void LoadSettings();
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -173,6 +186,9 @@ extern UINT g_msgDrag;  // RegisterWindowMessage, set in Wh_ModInit
 enum DragKind : WPARAM {
     kDragMove = 0,
     kDragResize = 1,
+    // Not a drag: the drag is over, and the window's own thread is the only
+    // one that may take the mod's WS_EX_LAYERED back off - see drag_fade.cpp.
+    kDragUnfade = 2,
 };
 
 bool IsDragModifierDown();
@@ -192,6 +208,15 @@ bool HandleDragRequest(MSG* msg);
 bool HandleModifierButtonDown(const MSG* msg, bool right);
 bool HandleButtonUp(bool right);
 bool HandleLeftButtonUp();
+
+////////////////////////////////////////////////////////////////////////////////
+// Translucency while dragging
+
+bool IsDragFading(HWND hwnd);
+BYTE DragAlphaFor(BYTE baseAlpha, int opacityPercent);
+BYTE FadeAlphaAt(BYTE from, BYTE to, int durationMs, int elapsedMs);
+void BeginDragFade(HWND root);
+void EndDragFade(HWND hwnd);
 
 ////////////////////////////////////////////////////////////////////////////////
 // The hooked APIs
