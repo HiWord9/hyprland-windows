@@ -23,6 +23,9 @@ Window handling the way Hyprland does it, on Windows.
 * **Win + double click** - maximize a window, or restore it. The title bar is
   gone, so the double click that used to be on it now works anywhere on the
   window; the settings offer other things for it to do.
+* **Win + middle click** - close the window under the cursor. The button, the
+  modifiers and the action are all settings; it can be a key instead, such as
+  Win+Q.
 * **Ctrl+Alt+H** - hide the focused window's title bar; press it again to bring
   the title bar back.
 
@@ -103,6 +106,22 @@ bar.
   $description: >-
     How long the second click may take, in milliseconds. 0 follows the
     double-click speed from the Windows mouse settings.
+- windowShortcut: Win+MButton
+  $name: Window shortcut
+  $description: >-
+    A key or a mouse button that acts on a window: with a mouse button it is
+    the window under the cursor, with a key the focused one. Combine Ctrl,
+    Alt, Shift and Win with "+", and use MButton, XButton1 or XButton2 for
+    the mouse - for example Win+MButton, Alt+XButton1 or Win+Q. Set it to
+    "none" to turn it off. Left and right are taken by move and resize, and
+    binding one of them here takes it away from the drag.
+- windowShortcutAction: close
+  $name: What the window shortcut does
+  $options:
+  - close: Close the window
+  - maximize: Maximize the window, or restore it if it is maximized
+  - titleBar: Hide the window's title bar, or bring it back
+  - none: Nothing
 - topEdgeResize: false
   $name: Resize from the top edge
   $description: >-

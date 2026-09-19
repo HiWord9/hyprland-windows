@@ -22,28 +22,51 @@ void ProcessRetrievedMessage(MSG* msg) {
             consumed = HandleHotkey(msg);
             break;
 
+        // The shortcut gets first refusal on every button: it can be bound
+        // to any of them, and one bound to left or right takes that button
+        // away from the drag, which is the user's business to decide.
         case WM_LBUTTONDOWN:
         case WM_LBUTTONDBLCLK:
         case WM_NCLBUTTONDOWN:
         case WM_NCLBUTTONDBLCLK:
-            consumed = HandleModifierButtonDown(msg, false);
+            consumed =
+                HandleShortcutButton(msg) || HandleModifierButtonDown(msg, false);
             break;
 
         case WM_RBUTTONDOWN:
         case WM_RBUTTONDBLCLK:
         case WM_NCRBUTTONDOWN:
         case WM_NCRBUTTONDBLCLK:
-            consumed = HandleModifierButtonDown(msg, true);
+            consumed =
+                HandleShortcutButton(msg) || HandleModifierButtonDown(msg, true);
+            break;
+
+        case WM_MBUTTONDOWN:
+        case WM_MBUTTONDBLCLK:
+        case WM_NCMBUTTONDOWN:
+        case WM_NCMBUTTONDBLCLK:
+        case WM_XBUTTONDOWN:
+        case WM_XBUTTONDBLCLK:
+        case WM_NCXBUTTONDOWN:
+        case WM_NCXBUTTONDBLCLK:
+            consumed = HandleShortcutButton(msg);
             break;
 
         case WM_LBUTTONUP:
         case WM_NCLBUTTONUP:
-            consumed = HandleLeftButtonUp();
+            consumed = HandleShortcutButtonUp(msg) || HandleLeftButtonUp();
             break;
 
         case WM_RBUTTONUP:
         case WM_NCRBUTTONUP:
-            consumed = HandleButtonUp(true);
+            consumed = HandleShortcutButtonUp(msg) || HandleButtonUp(true);
+            break;
+
+        case WM_MBUTTONUP:
+        case WM_NCMBUTTONUP:
+        case WM_XBUTTONUP:
+        case WM_NCXBUTTONUP:
+            consumed = HandleShortcutButtonUp(msg);
             break;
 
         default:

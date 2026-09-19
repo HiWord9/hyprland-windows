@@ -611,11 +611,7 @@ static void TestFramelessGeometry(bool withMenu, MenuBarMode mode) {
     CaptureWindow(hwnd, ("shown" + suffix).c_str());
 
     // Hotkey path: plain key (no modifiers) so no real key state is needed.
-    g_settings.hotkeyVk = 'H';
-    g_settings.hotkeyCtrl = false;
-    g_settings.hotkeyAlt = false;
-    g_settings.hotkeyShift = false;
-    g_settings.hotkeyWin = false;
+    g_settings.hotkey = Hotkey{'H', false, false, false, false};
     MSG key{hwnd, WM_KEYDOWN, 'H', 1, 0, {0, 0}};
     ProcessRetrievedMessage(&key);
     CHECK(key.message == WM_NULL, "hotkey keydown is swallowed");
@@ -675,11 +671,7 @@ static void TestMessageHook() {
     HWND hwnd = CreateTestWindow(L"Hypr message hook test", false, 300, 300);
     PumpRaw(200);
 
-    g_settings.hotkeyVk = 'H';
-    g_settings.hotkeyCtrl = false;
-    g_settings.hotkeyAlt = false;
-    g_settings.hotkeyShift = false;
-    g_settings.hotkeyWin = false;
+    g_settings.hotkey = Hotkey{'H', false, false, false, false};
 
     PostMessageW(hwnd, WM_KEYDOWN, 'H', 1);
     PumpRaw(300);
@@ -1320,15 +1312,85 @@ static void TestBorderFade() {
 static void TestGestures() {
     printf("\n== gestures ==\n");
 
-    CHECK(ParseWindowAction(L"") == WindowAction::ToggleMaximize,
+    CHECK(ParseWindowAction(L"", WindowAction::ToggleMaximize) ==
+              WindowAction::ToggleMaximize,
           "the default action is maximize");
-    CHECK(ParseWindowAction(L"maximize") == WindowAction::ToggleMaximize,
+    CHECK(ParseWindowAction(L"maximize", WindowAction::ToggleMaximize) ==
+              WindowAction::ToggleMaximize,
           "action maximize");
-    CHECK(ParseWindowAction(L"titleBar") == WindowAction::ToggleTitleBar,
+    CHECK(ParseWindowAction(L"titleBar", WindowAction::ToggleMaximize) ==
+              WindowAction::ToggleTitleBar,
           "action titleBar");
-    CHECK(ParseWindowAction(L"close") == WindowAction::Close, "action close");
-    CHECK(ParseWindowAction(L"none") == WindowAction::None, "action none");
-    CHECK(ParseWindowAction(L" OFF ") == WindowAction::None, "action off");
+    CHECK(ParseWindowAction(L"close", WindowAction::ToggleMaximize) ==
+              WindowAction::Close, "action close");
+    CHECK(ParseWindowAction(L"none", WindowAction::ToggleMaximize) ==
+              WindowAction::None, "action none");
+    CHECK(ParseWindowAction(L" OFF ", WindowAction::ToggleMaximize) ==
+              WindowAction::None, "action off");
+
+    // A binding is a key or a mouse button, with the same parser behind both.
+    Hotkey mid = ParseHotkey(L"", kDefaultWindowShortcut);
+    CHECK(mid.vk == VK_MBUTTON && mid.win && !mid.ctrl && !mid.alt,
+          "an unwritten shortcut means Win+MButton");
+    CHECK(ParseHotkey(L"Alt+XButton1", kDefaultWindowShortcut).vk ==
+              VK_XBUTTON1,
+          "shortcut Alt+XButton1");
+    CHECK(ParseHotkey(L"Win+Q", kDefaultWindowShortcut).vk == 'Q',
+          "shortcut Win+Q");
+    CHECK(ParseHotkey(L"none", kDefaultWindowShortcut).vk == 0,
+          "shortcut none turns it off");
+    CHECK(IsMouseButtonVk(VK_MBUTTON) && IsMouseButtonVk(VK_XBUTTON2),
+          "the mouse buttons are known as buttons");
+    CHECK(!IsMouseButtonVk('Q'), "and a key is not one");
+
+    CHECK(ButtonVkForMessage(WM_MBUTTONDOWN, 0) == VK_MBUTTON,
+          "a middle press is the middle button");
+    CHECK(ButtonVkForMessage(WM_NCMBUTTONUP, HTCAPTION) == VK_MBUTTON,
+          "and so is one on the frame");
+    CHECK(ButtonVkForMessage(WM_XBUTTONDOWN, MAKEWPARAM(0, XBUTTON2)) ==
+              VK_XBUTTON2,
+          "the side buttons are told apart");
+    CHECK(ButtonVkForMessage(WM_NCXBUTTONDOWN, MAKEWPARAM(HTCLIENT, XBUTTON1)) ==
+              VK_XBUTTON1,
+          "on the frame as well");
+    CHECK(ButtonVkForMessage(WM_MOUSEMOVE, 0) == 0,
+          "and a mouse move is no button at all");
+
+    // The whole button path, as an application's message pump sees it. No
+    // modifier is held here, so a bare middle click is left alone.
+    HWND target = CreateTestWindow(L"Hypr shortcut test", false, 300, 240);
+    Hotkey savedShortcut = g_settings.windowShortcut;
+    WindowAction savedAction = g_settings.windowShortcutAction;
+    g_settings.windowShortcut = Hotkey{VK_MBUTTON, false, false, false, false};
+    g_settings.windowShortcutAction = WindowAction::ToggleMaximize;
+
+    MSG mdown{target, WM_MBUTTONDOWN, 0, 0, 0, {}};
+    ProcessRetrievedMessage(&mdown);
+    CHECK(mdown.message == WM_NULL, "a bound middle press is taken");
+    MSG mup{target, WM_MBUTTONUP, 0, 0, 0, {}};
+    ProcessRetrievedMessage(&mup);
+    CHECK(mup.message == WM_NULL, "and so is the release that follows it");
+    MSG mup2{target, WM_MBUTTONUP, 0, 0, 0, {}};
+    ProcessRetrievedMessage(&mup2);
+    CHECK(mup2.message == WM_MBUTTONUP, "but only that one release");
+    Pump(400);
+    CHECK(IsZoomed(target), "and the action ran on the window under it");
+
+    g_settings.windowShortcut = Hotkey{VK_MBUTTON, true, false, false, false};
+    MSG bare{target, WM_MBUTTONDOWN, 0, 0, 0, {}};
+    ProcessRetrievedMessage(&bare);
+    CHECK(bare.message == WM_MBUTTONDOWN,
+          "a press without the modifiers passes through");
+    g_settings.windowShortcutAction = WindowAction::None;
+    g_settings.windowShortcut = Hotkey{VK_MBUTTON, false, false, false, false};
+    MSG off{target, WM_MBUTTONDOWN, 0, 0, 0, {}};
+    ProcessRetrievedMessage(&off);
+    CHECK(off.message == WM_MBUTTONDOWN, "so does one with no action bound");
+
+    g_settings.windowShortcut = savedShortcut;
+    g_settings.windowShortcutAction = savedAction;
+    DestroyWindow(target);
+    Pump(100);
 
     int savedTime = g_settings.doubleClickTime;
     g_settings.doubleClickTime = 0;

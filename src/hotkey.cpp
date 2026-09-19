@@ -1,4 +1,6 @@
-// The hotkey that toggles the title bar of the focused window.
+// The key bindings: the one that toggles the title bar of the focused window,
+// and the window shortcut when it has been bound to a key rather than to a
+// mouse button.
 #include "common.h"
 
 bool HandleHotkey(const MSG* msg) {
@@ -6,23 +8,27 @@ bool HandleHotkey(const MSG* msg) {
         return false;  // auto-repeat
     }
 
-    UINT vk = g_settings.hotkeyVk;
-    if (!vk || msg->wParam != vk) {
-        return false;
+    UINT vk = (UINT)msg->wParam;
+    HWND target =
+        msg->hwnd ? GetAncestor(msg->hwnd, GA_ROOT) : GetForegroundWindow();
+
+    Hotkey titleBar = g_settings.hotkey;
+    if (MatchesShortcut(titleBar, vk)) {
+        Wh_Log(L"Hotkey: toggling %p", target);
+        RequestFrameless(target, kActionToggle);
+        return true;
     }
 
-    bool ctrl = GetKeyState(VK_CONTROL) < 0;
-    bool alt = GetKeyState(VK_MENU) < 0;
-    bool shift = GetKeyState(VK_SHIFT) < 0;
-    bool win = GetKeyState(VK_LWIN) < 0 || GetKeyState(VK_RWIN) < 0;
-    if (ctrl != g_settings.hotkeyCtrl || alt != g_settings.hotkeyAlt ||
-        shift != g_settings.hotkeyShift || win != g_settings.hotkeyWin) {
-        return false;
+    // A shortcut bound to a key acts on the focused window - there is no
+    // cursor in the gesture to point at anything else.
+    Hotkey shortcut = g_settings.windowShortcut;
+    WindowAction action = g_settings.windowShortcutAction;
+    if (!g_uninitializing && action != WindowAction::None &&
+        !IsMouseButtonVk(shortcut.vk) && MatchesShortcut(shortcut, vk) &&
+        IsFrameWindow(target)) {
+        Wh_Log(L"Shortcut key on %p", target);
+        RequestWindowAction(target, action);
+        return true;
     }
-
-    HWND target = msg->hwnd ? GetAncestor(msg->hwnd, GA_ROOT)
-                            : GetForegroundWindow();
-    Wh_Log(L"Hotkey: toggling %p", target);
-    RequestFrameless(target, kActionToggle);
-    return true;
+    return false;
 }

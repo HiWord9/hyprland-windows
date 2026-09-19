@@ -10,6 +10,9 @@ a mod for [Windhawk](https://windhawk.net/).
 * **Win + double click** — maximize a window, or restore it. The title bar is
   gone, so the double click that used to be on it now works anywhere on the
   window; the settings offer other things for it to do.
+* **Win + middle click** — close the window under the cursor. The button, the
+  modifiers and the action are all settings; it can be a key instead, such as
+  Win+Q.
 * **Ctrl+Alt+H** — hide the focused window's title bar; press it again to bring
   the title bar back.
 

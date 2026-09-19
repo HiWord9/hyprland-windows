@@ -76,6 +76,11 @@ UINT ParseKeyName(PCWSTR raw) {
         {L"MULTIPLY", VK_MULTIPLY},  {L"ADD", VK_ADD},
         {L"SUBTRACT", VK_SUBTRACT},  {L"DECIMAL", VK_DECIMAL},
         {L"DIVIDE", VK_DIVIDE},
+        // Mouse buttons, so that a binding can be a click as easily as a key.
+        {L"MBUTTON", VK_MBUTTON},    {L"MIDDLE", VK_MBUTTON},
+        {L"XBUTTON1", VK_XBUTTON1},  {L"X1", VK_XBUTTON1},
+        {L"XBUTTON2", VK_XBUTTON2},  {L"X2", VK_XBUTTON2},
+        {L"LBUTTON", VK_LBUTTON},    {L"RBUTTON", VK_RBUTTON},
     };
     for (const auto& entry : kNames) {
         if (s == entry.name) {
@@ -167,10 +172,10 @@ int ParseCorners(PCWSTR raw) {
 // Splits "Ctrl+Alt+H" into the key and its modifiers. An empty setting means
 // "use the default", so the hotkey works even before Windhawk has written the
 // settings out; "none" is how you turn it off.
-Hotkey ParseHotkey(PCWSTR raw) {
+Hotkey ParseHotkey(PCWSTR raw, PCWSTR whenEmpty) {
     std::wstring spec = NormalizeSettingString(raw);
     if (spec.empty()) {
-        spec = NormalizeSettingString(kDefaultHotkey);
+        spec = NormalizeSettingString(whenEmpty);
     }
     if (spec == L"NONE" || spec == L"OFF" || spec == L"-") {
         return {};
@@ -205,12 +210,15 @@ Hotkey ParseHotkey(PCWSTR raw) {
 
 void LoadSettings() {
     WindhawkUtils::StringSetting hotkey(Wh_GetStringSetting(L"hotkey"));
-    Hotkey parsed = ParseHotkey(hotkey);
-    g_settings.hotkeyVk = parsed.vk;
-    g_settings.hotkeyCtrl = parsed.ctrl;
-    g_settings.hotkeyAlt = parsed.alt;
-    g_settings.hotkeyShift = parsed.shift;
-    g_settings.hotkeyWin = parsed.win;
+    g_settings.hotkey = ParseHotkey(hotkey, kDefaultHotkey);
+
+    WindhawkUtils::StringSetting shortcut(
+        Wh_GetStringSetting(L"windowShortcut"));
+    g_settings.windowShortcut = ParseHotkey(shortcut, kDefaultWindowShortcut);
+    WindhawkUtils::StringSetting shortcutAction(
+        Wh_GetStringSetting(L"windowShortcutAction"));
+    g_settings.windowShortcutAction =
+        ParseWindowAction(shortcutAction, WindowAction::Close);
 
     WindhawkUtils::StringSetting modifier(Wh_GetStringSetting(L"dragModifier"));
     g_settings.dragModifier = NormalizeSettingString(modifier) == L"ALT"
@@ -221,7 +229,8 @@ void LoadSettings() {
 
     WindhawkUtils::StringSetting doubleClick(
         Wh_GetStringSetting(L"doubleClickAction"));
-    g_settings.doubleClickAction = ParseWindowAction(doubleClick);
+    g_settings.doubleClickAction =
+        ParseWindowAction(doubleClick, WindowAction::ToggleMaximize);
     // Zero is a value of its own here - "whatever the mouse settings say" -
     // so it survives the clamp.
     g_settings.doubleClickTime =
@@ -257,18 +266,22 @@ void LoadSettings() {
     WindhawkUtils::StringSetting corners(Wh_GetStringSetting(L"corners"));
     g_settings.corners = ParseCorners(corners);
 
+    Hotkey key = g_settings.hotkey;
+    Hotkey shortcutKey = g_settings.windowShortcut;
     Wh_Log(L"Settings: hotkey vk=0x%02X ctrl=%d alt=%d shift=%d win=%d, "
            L"dragModifier=%s, topEdgeResize=%d, menuBar=%d, hideByDefault=%d, "
            L"dragTranslucency=%d, dragOpacity=%d",
-           g_settings.hotkeyVk.load(), (int)g_settings.hotkeyCtrl,
-           (int)g_settings.hotkeyAlt, (int)g_settings.hotkeyShift,
-           (int)g_settings.hotkeyWin,
+           key.vk, (int)key.ctrl, (int)key.alt, (int)key.shift, (int)key.win,
            g_settings.dragModifier == DragModifier::Alt ? L"alt" : L"win",
            (int)g_settings.topEdgeResize, (int)g_settings.menuBarMode.load(),
            (int)g_settings.hideByDefault,
            (int)g_settings.dragTranslucency.load(),
            g_settings.dragOpacity.load());
-    Wh_Log(L"Settings: doubleClickAction=%d, doubleClickTime=%d (%d ms)",
+    Wh_Log(L"Settings: doubleClickAction=%d, doubleClickTime=%d (%d ms), "
+           L"windowShortcut vk=0x%02X ctrl=%d alt=%d shift=%d win=%d -> %d",
            (int)g_settings.doubleClickAction.load(),
-           g_settings.doubleClickTime.load(), DoubleClickTimeMs());
+           g_settings.doubleClickTime.load(), DoubleClickTimeMs(),
+           shortcutKey.vk, (int)shortcutKey.ctrl, (int)shortcutKey.alt,
+           (int)shortcutKey.shift, (int)shortcutKey.win,
+           (int)g_settings.windowShortcutAction.load());
 }

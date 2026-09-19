@@ -9,10 +9,13 @@
 // process - a UWP frame, for one.
 #include "common.h"
 
-WindowAction ParseWindowAction(PCWSTR raw) {
+WindowAction ParseWindowAction(PCWSTR raw, WindowAction whenEmpty) {
     std::wstring s = NormalizeSettingString(raw);
     if (s == L"OFF" || s == L"NONE") {
         return WindowAction::None;
+    }
+    if (s == L"MAXIMIZE") {
+        return WindowAction::ToggleMaximize;
     }
     if (s == L"TITLEBAR") {
         return WindowAction::ToggleTitleBar;
@@ -20,7 +23,9 @@ WindowAction ParseWindowAction(PCWSTR raw) {
     if (s == L"CLOSE") {
         return WindowAction::Close;
     }
-    return WindowAction::ToggleMaximize;  // what the settings say by default
+    // Anything unrecognized, an empty setting included, is what this binding
+    // says it does by default.
+    return whenEmpty;
 }
 
 // Zero follows the double-click speed from the mouse settings, which is what
@@ -57,6 +62,115 @@ void RequestWindowAction(HWND root, WindowAction action) {
     if (!PostMessageW(root, g_msgDrag, kDragAction, (LPARAM)action)) {
         Wh_Log(L"Action request for %p failed (%u)", root, GetLastError());
     }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// The shortcut: modifiers and one key or mouse button
+
+bool IsMouseButtonVk(UINT vk) {
+    return vk == VK_LBUTTON || vk == VK_RBUTTON || vk == VK_MBUTTON ||
+           vk == VK_XBUTTON1 || vk == VK_XBUTTON2;
+}
+
+// Which button a message is about, as a virtual key; 0 for anything that is
+// not a button press or release.
+UINT ButtonVkForMessage(UINT message, WPARAM wParam) {
+    switch (message) {
+        case WM_LBUTTONDOWN:
+        case WM_LBUTTONDBLCLK:
+        case WM_LBUTTONUP:
+        case WM_NCLBUTTONDOWN:
+        case WM_NCLBUTTONDBLCLK:
+        case WM_NCLBUTTONUP:
+            return VK_LBUTTON;
+        case WM_RBUTTONDOWN:
+        case WM_RBUTTONDBLCLK:
+        case WM_RBUTTONUP:
+        case WM_NCRBUTTONDOWN:
+        case WM_NCRBUTTONDBLCLK:
+        case WM_NCRBUTTONUP:
+            return VK_RBUTTON;
+        case WM_MBUTTONDOWN:
+        case WM_MBUTTONDBLCLK:
+        case WM_MBUTTONUP:
+        case WM_NCMBUTTONDOWN:
+        case WM_NCMBUTTONDBLCLK:
+        case WM_NCMBUTTONUP:
+            return VK_MBUTTON;
+        case WM_XBUTTONDOWN:
+        case WM_XBUTTONDBLCLK:
+        case WM_XBUTTONUP:
+        case WM_NCXBUTTONDOWN:
+        case WM_NCXBUTTONDBLCLK:
+        case WM_NCXBUTTONUP:
+            // The button is in the high word for both the client and the
+            // non-client messages; only the low word differs between them.
+            return GET_XBUTTON_WPARAM(wParam) == XBUTTON2 ? VK_XBUTTON2
+                                                          : VK_XBUTTON1;
+        default:
+            return 0;
+    }
+}
+
+bool MatchesShortcut(const Hotkey& binding, UINT vk) {
+    if (!binding.vk || binding.vk != vk) {
+        return false;
+    }
+    // Ctrl, Alt and Shift as the thread saw them when it took the message,
+    // which is what a keyboard shortcut is about. The Win key is asked for
+    // globally instead: it belongs to the shell, and a thread's own copy of
+    // the keyboard state does not reliably hear about it.
+    bool ctrl = GetKeyState(VK_CONTROL) < 0;
+    bool alt = GetKeyState(VK_MENU) < 0;
+    bool shift = GetKeyState(VK_SHIFT) < 0;
+    bool win =
+        ((GetAsyncKeyState(VK_LWIN) | GetAsyncKeyState(VK_RWIN)) & 0x8000) != 0;
+    return ctrl == binding.ctrl && alt == binding.alt &&
+           shift == binding.shift && win == binding.win;
+}
+
+// A button press we consumed, so that its release goes the same way instead
+// of reaching the application on its own.
+thread_local UINT g_swallowShortcutButton;
+
+bool HandleShortcutButton(const MSG* msg) {
+    UINT vk = ButtonVkForMessage(msg->message, msg->wParam);
+    if (!vk) {
+        return false;
+    }
+    // Any fresh press means the release we were waiting to swallow is not
+    // coming any more.
+    g_swallowShortcutButton = 0;
+
+    Hotkey binding = g_settings.windowShortcut;
+    WindowAction action = g_settings.windowShortcutAction;
+    if (g_uninitializing || action == WindowAction::None ||
+        !MatchesShortcut(binding, vk)) {
+        return false;
+    }
+
+    HWND root = GetAncestor(msg->hwnd, GA_ROOT);
+    if (!root) {
+        root = msg->hwnd;
+    }
+    if (!IsFrameWindow(root)) {
+        return false;  // desktop, taskbar, menus... - normal click
+    }
+
+    Wh_Log(L"Shortcut on %p", root);
+    ArmWinMask(binding.win);
+    g_swallowShortcutButton = vk;
+    RequestWindowAction(root, action);
+    return true;
+}
+
+bool HandleShortcutButtonUp(const MSG* msg) {
+    UINT vk = ButtonVkForMessage(msg->message, msg->wParam);
+    if (!vk || g_swallowShortcutButton != vk) {
+        return false;
+    }
+    g_swallowShortcutButton = 0;
+    return true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

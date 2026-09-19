@@ -59,8 +59,11 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
 
 // Arm the Start-menu suppression for the drag that is about to begin. Must run
 // on the window's own (message-pumping) thread.
-void ArmWinMask() {
-    if (g_settings.dragModifier != DragModifier::Win) {
+// Called by whatever just consumed a Win + mouse gesture; `usingWin` is that
+// gesture's own answer to whether the Win key is part of it, because the
+// modifier is not the same setting for every one of them.
+void ArmWinMask(bool usingWin) {
+    if (!usingWin) {
         return;
     }
 

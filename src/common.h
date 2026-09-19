@@ -89,12 +89,24 @@ constexpr int kDefaultDragFadeOut = 60;
 // focus moves. Zero means the default here too.
 constexpr int kDefaultBorderFade = 150;
 
+// A parsed combination of modifiers and one key or mouse button. vk == 0
+// means there is no binding. Small and trivially copyable, so the settings
+// can hold one whole rather than a field at a time.
+struct Hotkey {
+    UINT vk = 0;
+    bool ctrl = false;
+    bool alt = false;
+    bool shift = false;
+    bool win = false;
+};
+
+constexpr PCWSTR kDefaultHotkey = L"Ctrl+Alt+H";
+constexpr PCWSTR kDefaultWindowShortcut = L"Win+MButton";
+
 struct Settings {
-    std::atomic<UINT> hotkeyVk{0};
-    std::atomic<bool> hotkeyCtrl{true};
-    std::atomic<bool> hotkeyAlt{true};
-    std::atomic<bool> hotkeyShift{false};
-    std::atomic<bool> hotkeyWin{false};
+    std::atomic<Hotkey> hotkey{};
+    std::atomic<Hotkey> windowShortcut{};
+    std::atomic<WindowAction> windowShortcutAction{WindowAction::Close};
     std::atomic<DragModifier> dragModifier{DragModifier::Win};
     std::atomic<bool> topEdgeResize{false};
     std::atomic<WindowAction> doubleClickAction{WindowAction::ToggleMaximize};
@@ -114,26 +126,18 @@ struct Settings {
 
 extern Settings g_settings;
 
-// A parsed key combination. vk == 0 means "no hotkey".
-struct Hotkey {
-    UINT vk = 0;
-    bool ctrl = false;
-    bool alt = false;
-    bool shift = false;
-    bool win = false;
-};
-
-constexpr PCWSTR kDefaultHotkey = L"Ctrl+Alt+H";
-
 std::wstring NormalizeSettingString(PCWSTR raw);
 UINT ParseKeyName(PCWSTR raw);
-Hotkey ParseHotkey(PCWSTR raw);
+// An empty setting means the documented default, which is not the same one
+// for every binding - Windhawk hands out an empty string for a setting it has
+// never written.
+Hotkey ParseHotkey(PCWSTR raw, PCWSTR whenEmpty = kDefaultHotkey);
 COLORREF ParseBorderColor(PCWSTR raw);
 bool ParseBorderTransition(PCWSTR raw);
 MenuBarMode ParseMenuBarMode(PCWSTR raw);
 int ParseCorners(PCWSTR raw);
 DragTranslucency ParseDragTranslucency(PCWSTR raw);
-WindowAction ParseWindowAction(PCWSTR raw);
+WindowAction ParseWindowAction(PCWSTR raw, WindowAction whenEmpty);
 int ClampedSetting(int value, int fallback, int low, int high);
 void LoadSettings();
 
@@ -224,7 +228,7 @@ constexpr WORD kMaskVk = 0xE8;  // unassigned VK, only used as "a key was hit"
 // own low-level hook lets them through.
 constexpr ULONG_PTR kInjectedMarker = 0x48797072;  // 'Hypr'
 
-void ArmWinMask();
+void ArmWinMask(bool usingWin);
 void ShutdownWinMask();
 
 // A drag is requested with this message, posted to the window that is to be
@@ -268,6 +272,14 @@ bool HandleLeftButtonUp();
 
 ////////////////////////////////////////////////////////////////////////////////
 // Gestures with the modifier held, and what they do to a window
+
+// A binding matches when its key or button is the one that just arrived and
+// the modifiers are held.
+bool IsMouseButtonVk(UINT vk);
+UINT ButtonVkForMessage(UINT message, WPARAM wParam);
+bool MatchesShortcut(const Hotkey& binding, UINT vk);
+bool HandleShortcutButton(const MSG* msg);
+bool HandleShortcutButtonUp(const MSG* msg);
 
 int DoubleClickTimeMs();
 // Whether this press and the one before it on this thread are a double click.
