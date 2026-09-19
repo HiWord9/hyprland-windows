@@ -84,29 +84,47 @@ struct BorderFade {
     COLORREF to;
     DWORD startTick;
     int durationMs;
+    // Which fade of this window's this is: a retarget gets a new one, so a
+    // batch of writes that was in flight at the time knows not to end it.
+    unsigned long long seq;
 };
 
 std::mutex g_borderMutex;
 std::unordered_map<HWND, BorderFade> g_borderFades;
-bool g_borderThreadRunning;  // guarded by g_borderMutex
+bool g_borderThreadRunning;        // guarded by g_borderMutex
+unsigned long long g_borderSeq;    // guarded by g_borderMutex
+// Set while the thread is handing a batch of colors to DWM, which it does
+// outside the lock - the window bookkeeping has a lock of its own, and the
+// two are never held at once.
+std::atomic<bool> g_borderWriting;
 
 constexpr DWORD kBorderStepMs = 16;    // ~60 Hz
 constexpr int kBorderFinishWaitMs = 300;
+constexpr int kBorderWriteWaitMs = 20;
 
 bool IsBorderFading(HWND hwnd) {
     std::lock_guard<std::mutex> lock(g_borderMutex);
     return g_borderFades.count(hwnd) != 0;
 }
 
+// Stops the fade and waits for any color already on its way to the window, so
+// that whatever the caller writes next is what stays on it.
 void CancelBorderFade(HWND hwnd) {
-    std::lock_guard<std::mutex> lock(g_borderMutex);
-    g_borderFades.erase(hwnd);
+    {
+        std::lock_guard<std::mutex> lock(g_borderMutex);
+        g_borderFades.erase(hwnd);
+    }
+    for (int waited = 0; waited < kBorderWriteWaitMs && g_borderWriting;
+         waited++) {
+        Sleep(1);
+    }
 }
 
 DWORD WINAPI BorderFadeThread(LPVOID param) {
     bool more = true;
     while (more) {
         std::vector<std::pair<HWND, COLORREF>> writes;
+        std::vector<std::pair<HWND, unsigned long long>> finished;
         {
             std::lock_guard<std::mutex> lock(g_borderMutex);
             if (g_uninitializing) {
@@ -116,29 +134,40 @@ DWORD WINAPI BorderFadeThread(LPVOID param) {
                 g_borderFades.clear();
             }
             DWORD now = GetTickCount();
-            for (auto it = g_borderFades.begin(); it != g_borderFades.end();) {
-                const BorderFade& fade = it->second;
+            for (const auto& [hwnd, fade] : g_borderFades) {
                 double t = AnimationProgress((int)(now - fade.startTick),
                                              fade.durationMs);
-                bool alive = IsWindow(it->first);
+                bool alive = IsWindow(hwnd);
                 if (alive) {
-                    writes.emplace_back(it->first,
-                                        BlendColor(fade.from, fade.to, t));
+                    writes.emplace_back(hwnd, BlendColor(fade.from, fade.to, t));
                 }
                 if (!alive || t >= 1.0) {
-                    it = g_borderFades.erase(it);
-                } else {
-                    ++it;
+                    finished.emplace_back(hwnd, fade.seq);
+                }
+            }
+        }
+
+        g_borderWriting = true;
+        for (const auto& [hwnd, color] : writes) {
+            WriteBorderColor(hwnd, color);
+        }
+        g_borderWriting = false;
+
+        // Only now is a finished fade over. Taking it out any earlier would
+        // say the window is done while its last color is still on its way,
+        // which is exactly what the teardown and the restore wait for.
+        {
+            std::lock_guard<std::mutex> lock(g_borderMutex);
+            for (const auto& [hwnd, seq] : finished) {
+                auto it = g_borderFades.find(hwnd);
+                if (it != g_borderFades.end() && it->second.seq == seq) {
+                    g_borderFades.erase(it);
                 }
             }
             more = !g_borderFades.empty();
             if (!more) {
                 g_borderThreadRunning = false;
             }
-        }
-
-        for (const auto& [hwnd, color] : writes) {
-            WriteBorderColor(hwnd, color);
         }
         if (more) {
             Sleep(kBorderStepMs);
@@ -182,7 +211,8 @@ void AnimateBorderColor(HWND hwnd, bool active) {
     MarkDwmTouched(hwnd);
     {
         std::lock_guard<std::mutex> lock(g_borderMutex);
-        g_borderFades[hwnd] = BorderFade{from, to, GetTickCount(), durationMs};
+        g_borderFades[hwnd] =
+            BorderFade{from, to, GetTickCount(), durationMs, ++g_borderSeq};
         if (g_borderThreadRunning) {
             return;  // the thread picks this one up on its next step
         }
