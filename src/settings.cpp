@@ -95,6 +95,9 @@ COLORREF ParseBorderColor(PCWSTR raw) {
     if (s == L"NONE") {
         return DWMWA_COLOR_NONE;
     }
+    if (s == L"ACCENT") {
+        return kColorAccent;
+    }
     if (s[0] == L'#') {
         s.erase(0, 1);
     }

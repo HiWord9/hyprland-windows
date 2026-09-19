@@ -71,6 +71,10 @@ enum class DragTranslucency { Both, MoveOnly, Off };
 
 // Sentinel for "leave the DWM attribute alone" (not a valid DWM color value).
 constexpr COLORREF kColorUntouched = 0xFFFFFFFD;
+// And for "whatever the Windows accent color is". Kept as a sentinel rather
+// than resolved when the settings are read, so that an accent color that
+// changes afterwards is followed without reparsing anything.
+constexpr COLORREF kColorAccent = 0xFFFFFFFC;
 
 // The translucency of a dragged window, and how long it takes to get there
 // and back. Also what a setting Windhawk has never written out means, since
@@ -148,6 +152,7 @@ LRESULT AdjustHitTest(HWND hwnd, LRESULT hit, LPARAM lParam);
 ////////////////////////////////////////////////////////////////////////////////
 // DWM decorations
 
+COLORREF AccentBorderColor();
 COLORREF BorderColorFor(bool active);
 bool IsBlendableColor(COLORREF color);
 COLORREF BlendColor(COLORREF from, COLORREF to, double t);

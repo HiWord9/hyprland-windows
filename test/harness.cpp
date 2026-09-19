@@ -311,6 +311,9 @@ static void TestParsers() {
     CHECK(ParseBorderColor(L"33CCFF") == RGB(0x33, 0xcc, 0xff),
           "color 33CCFF (no #)");
     CHECK(ParseBorderColor(L"#fff") == RGB(255, 255, 255), "color #fff");
+    CHECK(ParseBorderColor(L"accent") == kColorAccent, "color accent");
+    CHECK(ParseBorderColor(L" ACCENT ") == kColorAccent,
+          "color ' ACCENT ' (trim + case)");
     CHECK(ParseBorderColor(L"#12345") == kColorUntouched,
           "color #12345 rejected");
     CHECK(ParseBorderColor(L"#gg0000") == kColorUntouched,
@@ -383,6 +386,18 @@ static void TestParsers() {
     CHECK(!IsBlendableColor(kColorUntouched), "neither can \"untouched\"");
     CHECK(!IsBlendableColor((COLORREF)DWMWA_COLOR_DEFAULT),
           "nor the system default");
+
+    // "accent" is a color to fade through, unlike the two states above: it is
+    // resolved to a real one every time it is used.
+    COLORREF accent = AccentBorderColor();
+    printf("  the accent color here is 0x%06lX\n", accent);
+    CHECK(IsBlendableColor(accent), "the accent color resolves to a color");
+    COLORREF wasActive = g_settings.borderActive;
+    g_settings.borderActive = kColorAccent;
+    CHECK(BorderColorFor(true) == accent, "and is what an accent border gets");
+    CHECK(IsBlendableColor(BorderColorFor(true)),
+          "so a fade to or from it works like any other color");
+    g_settings.borderActive = wasActive;
 
     RECT rc{100, 100, 300, 300};
     CHECK(ResizeEdgeForPoint(rc, {120, 120}) == WMSZ_TOPLEFT, "corner top-left");
@@ -1195,6 +1210,36 @@ static void TestBorderFade() {
               CurrentBorderColor(hwnd) == (COLORREF)DWMWA_COLOR_NONE,
           "no border is not a color to fade to (0x%06lX)",
           CurrentBorderColor(hwnd));
+    g_settings.borderInactive = kInactive;
+
+    // An accent border is a real color by the time the fade sees it, so it
+    // fades like any other - and it is resolved on the way, not when the
+    // settings were read.
+    g_settings.borderActive = kColorAccent;
+    ApplyBorderColor(hwnd, false);
+    // Read once, and compared against that: an accent color picked from the
+    // wallpaper moves on its own, and the fade is heading for the one that
+    // was there when focus changed.
+    COLORREF accentThen = AccentBorderColor();
+    SendMessageW(hwnd, WM_NCACTIVATE, TRUE, 0);
+    CHECK(IsBorderFading(hwnd), "an accent border fades too");
+    for (int i = 0; i < 40 && IsBorderFading(hwnd); i++) {
+        Sleep(25);
+    }
+    CHECK(CurrentBorderColor(hwnd) == accentThen,
+          "and lands on the accent color (0x%06lX, wanted 0x%06lX)",
+          CurrentBorderColor(hwnd), accentThen);
+
+    // The accent itself moving re-applies the color at once, without waiting
+    // for focus to go anywhere. Both sides are the accent here, so it does
+    // not matter which of them this window is entitled to.
+    g_settings.borderInactive = kColorAccent;
+    SetCurrentBorderColor(hwnd, RGB(1, 2, 3));  // as if the accent had moved
+    SendMessageW(hwnd, WM_DWMCOLORIZATIONCOLORCHANGED, 0, 0);
+    CHECK(CurrentBorderColor(hwnd) == AccentBorderColor() &&
+              !IsBorderFading(hwnd),
+          "an accent change re-applies the border color at once");
+    g_settings.borderActive = kActive;
     g_settings.borderInactive = kInactive;
 
     // A title bar coming back stops the fade: the restore writes the system

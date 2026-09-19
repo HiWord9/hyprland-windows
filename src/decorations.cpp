@@ -7,11 +7,40 @@
 // on screen until its title bar comes back.
 #include "common.h"
 
+// The Windows accent color, as a real color to paint with.
+//
+// AccentColor in the registry is 0xAABBGGRR - a COLORREF with an alpha on top
+// of it - so the alpha is all that has to come off. That it is that way round
+// and not ARGB is measurable: ColorizationColor next to it holds the same
+// color, is documented as ARGB, and the two values are byte-swapped copies of
+// each other. DwmGetColorizationColor, the fallback here, is ARGB as well, so
+// that one does need its red and blue exchanged.
+COLORREF AccentBorderColor() {
+    DWORD accent = 0;
+    DWORD size = sizeof(accent);
+    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\DWM",
+                     L"AccentColor", RRF_RT_REG_DWORD, nullptr, &accent,
+                     &size) == ERROR_SUCCESS) {
+        return accent & 0x00FFFFFF;
+    }
+
+    DWORD colorization = 0;
+    BOOL opaque = FALSE;
+    if (SUCCEEDED(DwmGetColorizationColor(&colorization, &opaque))) {
+        return RGB((colorization >> 16) & 0xFF, (colorization >> 8) & 0xFF,
+                   colorization & 0xFF);
+    }
+    return kColorUntouched;  // no accent to be had; leave the border alone
+}
+
 // The color a window's border is meant to have, the way DWM wants it: a color,
 // or DWMWA_COLOR_DEFAULT when the setting is empty.
 COLORREF BorderColorFor(bool active) {
     COLORREF color =
         active ? g_settings.borderActive : g_settings.borderInactive;
+    if (color == kColorAccent) {
+        color = AccentBorderColor();
+    }
     return color == kColorUntouched ? (COLORREF)DWMWA_COLOR_DEFAULT : color;
 }
 

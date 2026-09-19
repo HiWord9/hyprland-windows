@@ -105,6 +105,12 @@ LRESULT CALLBACK FramelessSubclassProc(HWND hwnd,
             AnimateBorderColor(hwnd, wParam != FALSE);
             break;
 
+        case WM_DWMCOLORIZATIONCOLORCHANGED:
+            // The accent color moved, so a border set to "accent" follows it.
+            // At once, not faded: this is not a focus change.
+            ApplyBorderColor(hwnd, GetForegroundWindow() == hwnd);
+            break;
+
         case WM_NCDESTROY: {
             RemoveWindowSubclass(hwnd, FramelessSubclassProc, uIdSubclass);
             std::lock_guard<std::mutex> lock(g_windowsMutex);
