@@ -1124,6 +1124,31 @@ static void TestMoveResize() {
     CHECK(click.message == WM_LBUTTONDOWN,
           "click without modifier passes through");
 
+    // The magnet, through a real drag. Against the work area rather than
+    // another window, because that line is known exactly and no window
+    // someone happens to have open can take the pull instead.
+    g_settings.snap = SnapMode::Monitor;
+    g_settings.snapMonitorGap = 0;
+    MONITORINFO mi{sizeof(mi)};
+    GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+    RECT winBefore;
+    GetWindowRect(hwnd, &winBefore);
+    // Through the mod's own idea of the visible frame, which is the window
+    // rectangle itself when DWM's numbers are in another coordinate space.
+    RECT frameBefore = VisibleFrameOf(hwnd);
+    POINT snapGrab{(winBefore.left + winBefore.right) / 2,
+                   (winBefore.top + winBefore.bottom) / 2};
+    // Aim its visible left edge a few pixels short of the work area's.
+    POINT snapDelta{mi.rcWork.left + 6 - frameBefore.left, 0};
+    DragWith(false, hwnd, snapGrab, snapDelta, kDragMove);
+    PumpRaw(200);
+    RECT frameAfter = VisibleFrameOf(hwnd);
+    CHECK(frameAfter.left == mi.rcWork.left,
+          "a dragged window sticks to the work area edge (%ld vs %ld)",
+          frameAfter.left, mi.rcWork.left);
+    CHECK(!IsDragSnapping(hwnd), "and the subclass comes off with the drag");
+    g_settings.snap = SnapMode::Off;
+
     // The double-click gesture through the real message path, seen the way an
     // application sees it. With Alt as the modifier: holding Win here would
     // open the Start menu if anything about the mask went wrong, and that is
@@ -1304,6 +1329,120 @@ static void TestBorderFade() {
     g_settings.borderActive = kColorUntouched;
     g_settings.borderInactive = kColorUntouched;
     g_settings.borderFadeDuration = kDefaultBorderFade;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Magnetic edges, and the shape kept while resizing
+//
+// On a made-up desktop: a neighbour and a work area, with no real windows
+// involved, so the rules can be checked exactly rather than against whatever
+// happens to be on screen.
+
+static void TestSnapGeometry() {
+    printf("\n== magnetic edges ==\n");
+
+    CHECK(ParseSnapMode(L"") == SnapMode::Both, "snap defaults to both");
+    CHECK(ParseSnapMode(L"windows") == SnapMode::Windows, "snap windows only");
+    CHECK(ParseSnapMode(L"monitor") == SnapMode::Monitor, "snap monitor only");
+    CHECK(ParseSnapMode(L"none") == SnapMode::Off, "snap none");
+    CHECK(ParseModifierVk(L"", VK_SHIFT) == VK_SHIFT,
+          "the shape key defaults to Shift");
+    CHECK(ParseModifierVk(L"ctrl", VK_SHIFT) == VK_CONTROL, "shape key ctrl");
+    CHECK(ParseModifierVk(L"none", VK_SHIFT) == 0, "shape key off");
+
+    std::vector<int> lines{100, 300};
+    CHECK(SnappedEdge(104, lines, 12) == 100, "an edge takes the nearest line");
+    CHECK(SnappedEdge(296, lines, 12) == 300, "from either side of it");
+    CHECK(SnappedEdge(150, lines, 12) == 150, "and stays put when none is near");
+
+    RECT inset{9, 0, -9, -9};
+    RECT window{100, 100, 500, 400};
+    RECT frame = WindowToFrame(window, inset);
+    CHECK(frame.left == 109 && frame.top == 100 && frame.right == 491 &&
+              frame.bottom == 391,
+          "the visible frame sits inside the window rectangle");
+    RECT back = FrameToWindow(frame, inset);
+    CHECK(EqualRect(&back, &window), "and converts back to it exactly");
+
+    SnapMode savedMode = g_settings.snap;
+    int savedWindowGap = g_settings.snapWindowGap;
+    int savedMonitorGap = g_settings.snapMonitorGap;
+    g_settings.snap = SnapMode::Both;
+    g_settings.snapWindowGap = 0;
+    g_settings.snapMonitorGap = 0;
+
+    SnapState desktop;
+    desktop.windows.push_back(RECT{500, 200, 900, 600});
+    desktop.monitors.push_back(RECT{0, 0, 1920, 1040});
+
+    RECT moved{294, 300, 494, 500};  // its right edge 6 short of the neighbour
+    SnapMovedFrame(desktop, 12, &moved);
+    CHECK(moved.right == 500 && moved.left == 300,
+          "a moved window lines up with the one beside it (%ld,%ld)", moved.left,
+          moved.right);
+
+    g_settings.snapWindowGap = 8;
+    RECT gapped{294, 300, 494, 500};
+    SnapMovedFrame(desktop, 12, &gapped);
+    CHECK(gapped.right == 492, "and leaves the gap it is asked for (%ld)",
+          gapped.right);
+    g_settings.snapWindowGap = 0;
+
+    RECT apart{294, 30, 494, 120};  // beside it on paper, but nowhere near it
+    SnapMovedFrame(desktop, 12, &apart);
+    CHECK(apart.right == 494,
+          "a window that does not overlap it is left alone (%ld)", apart.right);
+
+    RECT distant{200, 300, 400, 500};
+    SnapMovedFrame(desktop, 12, &distant);
+    CHECK(distant.right == 400, "and so is one that is simply too far away");
+
+    g_settings.snap = SnapMode::Monitor;
+    RECT edge{6, 500, 206, 700};
+    SnapMovedFrame(desktop, 12, &edge);
+    CHECK(edge.left == 0 && edge.right == 200,
+          "the edge of the screen pulls it too (%ld)", edge.left);
+    RECT neighbourOnly{294, 300, 494, 500};
+    SnapMovedFrame(desktop, 12, &neighbourOnly);
+    CHECK(neighbourOnly.right == 494,
+          "and with windows switched off, another window does not");
+
+    // A resize moves the edges being pulled and no others.
+    g_settings.snap = SnapMode::Both;
+    RECT sized{100, 300, 494, 500};
+    SnapSizedFrame(desktop, WMSZ_RIGHT, 12, &sized);
+    CHECK(sized.right == 500 && sized.left == 100,
+          "a resize sticks the edge being pulled (%ld,%ld)", sized.left,
+          sized.right);
+    RECT other{494, 300, 800, 500};
+    SnapSizedFrame(desktop, WMSZ_RIGHT, 12, &other);
+    CHECK(other.left == 494, "and leaves the one that is not (%ld)", other.left);
+
+    // The shape, when the key for it is held.
+    RECT start{0, 0, 400, 200};  // two to one
+    RECT corner{0, 0, 600, 260};
+    ApplyAspectRatio(WMSZ_BOTTOMRIGHT, start, &corner);
+    CHECK(corner.right == 600 && corner.bottom == 300,
+          "a corner keeps the shape, widest axis first (%ldx%ld)",
+          corner.right - corner.left, corner.bottom - corner.top);
+    CHECK(corner.left == 0 && corner.top == 0,
+          "with the corner that is not being held left where it was");
+
+    RECT side{-100, 0, 400, 200};
+    ApplyAspectRatio(WMSZ_LEFT, start, &side);
+    CHECK(side.left == -100 && side.right == 400 && side.bottom == 250,
+          "a side takes the other axis with it (%ldx%ld)",
+          side.right - side.left, side.bottom - side.top);
+
+    RECT tall{0, 0, 400, 400};
+    ApplyAspectRatio(WMSZ_TOP, start, &tall);
+    CHECK(tall.right == 800 && tall.top == 0,
+          "and so does the top, from the bottom edge (%ldx%ld)",
+          tall.right - tall.left, tall.bottom - tall.top);
+
+    g_settings.snap = savedMode;
+    g_settings.snapWindowGap = savedWindowGap;
+    g_settings.snapMonitorGap = savedMonitorGap;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1662,6 +1801,9 @@ int main(int argc, char** argv) {
     Wh_ModInit();  // registers the message, settings come from stubs
     g_settings.topEdgeResize = true;
     g_settings.dragModifier = DragModifier::Win;
+    // Off for the tests that check where a drag put a window: whatever else
+    // is on this desktop would otherwise have a say in it.
+    g_settings.snap = SnapMode::Off;
 
     TestParsers();
     TestFramelessGeometry(false, MenuBarMode::Hide);
@@ -1670,6 +1812,7 @@ int main(int argc, char** argv) {
     TestMessageHook();
     TestAutoHide();
     TestBorderFade();
+    TestSnapGeometry();
     TestGestures();
     TestResizeRelease();
     TestDragFade();

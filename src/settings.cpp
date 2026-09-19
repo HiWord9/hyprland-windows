@@ -149,6 +149,37 @@ DragTranslucency ParseDragTranslucency(PCWSTR raw) {
     return DragTranslucency::Both;
 }
 
+SnapMode ParseSnapMode(PCWSTR raw) {
+    std::wstring s = NormalizeSettingString(raw);
+    if (s == L"OFF" || s == L"NONE") {
+        return SnapMode::Off;
+    }
+    if (s == L"MONITOR" || s == L"SCREEN") {
+        return SnapMode::Monitor;
+    }
+    if (s == L"WINDOWS") {
+        return SnapMode::Windows;
+    }
+    return SnapMode::Both;
+}
+
+UINT ParseModifierVk(PCWSTR raw, UINT whenEmpty) {
+    std::wstring s = NormalizeSettingString(raw);
+    if (s.empty()) {
+        return whenEmpty;
+    }
+    if (s == L"SHIFT") {
+        return VK_SHIFT;
+    }
+    if (s == L"CTRL" || s == L"CONTROL") {
+        return VK_CONTROL;
+    }
+    if (s == L"ALT") {
+        return VK_MENU;
+    }
+    return 0;  // "off", and anything else nobody can hold down
+}
+
 // A setting Windhawk has never written out reads as zero, which is why zero
 // means "the documented default" rather than a value of its own.
 int ClampedSetting(int value, int fallback, int low, int high) {
@@ -265,6 +296,19 @@ void LoadSettings() {
 
     WindhawkUtils::StringSetting corners(Wh_GetStringSetting(L"corners"));
     g_settings.corners = ParseCorners(corners);
+
+    WindhawkUtils::StringSetting snap(Wh_GetStringSetting(L"snap"));
+    g_settings.snap = ParseSnapMode(snap);
+    g_settings.snapDistance = ClampedSetting(Wh_GetIntSetting(L"snapDistance"),
+                                             kDefaultSnapDistance, 1, 64);
+    // Zero is a gap of its own here, so it survives the clamp.
+    g_settings.snapWindowGap =
+        ClampedSetting(Wh_GetIntSetting(L"snapWindowGap"), 0, 0, 64);
+    g_settings.snapMonitorGap =
+        ClampedSetting(Wh_GetIntSetting(L"snapMonitorGap"), 0, 0, 64);
+    WindhawkUtils::StringSetting keepAspect(
+        Wh_GetStringSetting(L"keepAspectModifier"));
+    g_settings.keepAspectVk = ParseModifierVk(keepAspect, VK_SHIFT);
 
     Hotkey key = g_settings.hotkey;
     Hotkey shortcutKey = g_settings.windowShortcut;

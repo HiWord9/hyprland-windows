@@ -70,6 +70,8 @@ enum class MenuBarMode { Hide, KeepMenu, Skip };
 enum class WindowAction { None, ToggleMaximize, ToggleTitleBar, Close };
 // Which drags fade the window they are dragging.
 enum class DragTranslucency { Both, MoveOnly, Off };
+// What a dragged window's edges are magnetic to.
+enum class SnapMode { Both, Monitor, Windows, Off };
 
 // Sentinel for "leave the DWM attribute alone" (not a valid DWM color value).
 constexpr COLORREF kColorUntouched = 0xFFFFFFFD;
@@ -88,6 +90,10 @@ constexpr int kDefaultDragFadeOut = 60;
 // How long the border color takes to cross from one setting to the other when
 // focus moves. Zero means the default here too.
 constexpr int kDefaultBorderFade = 150;
+
+// How close an edge has to come before it sticks, in units of a 96 dpi pixel
+// so that the pull feels the same whatever a monitor is scaled to.
+constexpr int kDefaultSnapDistance = 12;
 
 // A parsed combination of modifiers and one key or mouse button. vk == 0
 // means there is no binding. Small and trivially copyable, so the settings
@@ -122,6 +128,11 @@ struct Settings {
     std::atomic<bool> borderFade{true};
     std::atomic<int> borderFadeDuration{kDefaultBorderFade};
     std::atomic<int> corners{DWMWCP_DEFAULT};
+    std::atomic<SnapMode> snap{SnapMode::Both};
+    std::atomic<int> snapDistance{kDefaultSnapDistance};
+    std::atomic<int> snapWindowGap{0};
+    std::atomic<int> snapMonitorGap{0};
+    std::atomic<UINT> keepAspectVk{VK_SHIFT};  // 0: never keep the ratio
 };
 
 extern Settings g_settings;
@@ -137,6 +148,9 @@ bool ParseBorderTransition(PCWSTR raw);
 MenuBarMode ParseMenuBarMode(PCWSTR raw);
 int ParseCorners(PCWSTR raw);
 DragTranslucency ParseDragTranslucency(PCWSTR raw);
+SnapMode ParseSnapMode(PCWSTR raw);
+// A single modifier key, as a virtual key; 0 when the setting turns it off.
+UINT ParseModifierVk(PCWSTR raw, UINT whenEmpty);
 WindowAction ParseWindowAction(PCWSTR raw, WindowAction whenEmpty);
 int ClampedSetting(int value, int fallback, int low, int high);
 void LoadSettings();
@@ -244,6 +258,9 @@ enum DragKind : WPARAM {
     // Nor is this one: a gesture that asks the window to do something to
     // itself, with the WindowAction in lParam - see actions.cpp.
     kDragAction = 3,
+    // Sent, not posted, and answered by the drag subclass rather than by the
+    // message hook: the teardown taking that subclass off - see snap.cpp.
+    kDragUnsnap = 4,
 };
 
 // How long the thread that ends a resize waits for its loop to start. The
@@ -288,6 +305,15 @@ bool IsDoubleClickAt(HWND root, POINT pt, DWORD tick);
 void ForgetLastPress();
 void DoWindowAction(HWND hwnd, WindowAction action);
 void RequestWindowAction(HWND root, WindowAction action);
+
+////////////////////////////////////////////////////////////////////////////////
+// Magnetic edges, and the aspect ratio while resizing
+
+RECT VisibleFrameOf(HWND hwnd);
+void BeginDragSnap(HWND root, WPARAM kind, POINT pt);
+void EndDragSnap(HWND hwnd);
+bool IsDragSnapping(HWND hwnd);
+std::vector<HWND> SnapshotSnappedWindows();
 
 ////////////////////////////////////////////////////////////////////////////////
 // Translucency while dragging

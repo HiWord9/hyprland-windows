@@ -268,6 +268,7 @@ bool HandleDragRequest(MSG* msg) {
     bool started = kind == kDragResize ? StartResize(root, pt, msg)
                                        : StartMove(root, pt, msg);
     if (started) {
+        BeginDragSnap(root, kind, pt);
         BeginDragFade(root, kind);
     }
     return started;

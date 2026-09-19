@@ -41,6 +41,7 @@ MODULES = [
     "drag.cpp",
     "drag_fade.cpp",
     "actions.cpp",
+    "snap.cpp",
     "hooks.cpp",
     "mod.cpp",
 ]

@@ -55,6 +55,15 @@ void Wh_ModBeforeUninit() {
     // a color written after that would stay on the window for good.
     FinishBorderFades();
 
+    // A drag in progress has a subclass of ours on its window as well, and
+    // the same rule applies to it: it has to come off on the window's own
+    // thread, which is where this sent message is answered.
+    for (HWND hwnd : SnapshotSnappedWindows()) {
+        DWORD_PTR result;
+        SendMessageTimeoutW(hwnd, g_msgDrag, kDragUnsnap, 0,
+                            SMTO_ABORTIFHUNG | SMTO_BLOCK, 2000, &result);
+    }
+
     // Restore synchronously on each window's thread, so that no subclass
     // procedure is left behind once the DLL is gone. A subclass procedure in
     // an unmapped image crashes its application the next time the window gets

@@ -32,7 +32,10 @@ Window handling the way Hyprland does it, on Windows.
 Moving and resizing feel like the real thing: windows still snap to the screen
 edges, dragging one to the top still offers the Windows 11 snap layouts, and
 `Esc` cancels a drag in progress. A window you are dragging fades to slightly
-translucent while you hold it, the way a Hyprland window does.
+translucent while you hold it, the way a Hyprland window does, and its edges
+are magnetic: bring one close to another window or to the edge of the screen
+and it lines up with it. Hold `Shift` while resizing to keep the window's
+proportions.
 
 Give the windows with a hidden title bar a border color - your own, or
 `accent` to follow the Windows accent color - and it fades from one color to
@@ -90,6 +93,41 @@ bar.
   $name: Fade-out time
   $description: >-
     How long it takes to come back once the drag ends, in milliseconds
+- snap: both
+  $name: Magnetic edges while dragging
+  $description: >-
+    A window being moved or resized sticks to the edges of other windows and
+    of the screen when it comes close, the way a floating window does in
+    Hyprland.
+  $options:
+  - both: To other windows and to the screen
+  - windows: To other windows only
+  - monitor: To the screen only
+  - none: Off
+- snapDistance: 12
+  $name: Magnet strength
+  $description: >-
+    How close an edge has to come before it sticks, in pixels at 100% scaling
+- snapWindowGap: 0
+  $name: Gap between windows
+  $description: >-
+    How much room to leave when a window sticks to another one, in pixels.
+    0 puts them edge to edge.
+- snapMonitorGap: 0
+  $name: Gap at the screen edge
+  $description: >-
+    How much room to leave when a window sticks to the edge of the screen,
+    in pixels
+- keepAspectModifier: shift
+  $name: Keep the shape while resizing
+  $description: >-
+    Hold this key while resizing a window to keep its proportions. The magnet
+    steps aside while it is held.
+  $options:
+  - shift: Shift
+  - ctrl: Ctrl
+  - alt: Alt
+  - none: Off
 - doubleClickAction: maximize
   $name: Modifier + double click
   $description: >-
