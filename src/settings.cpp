@@ -295,6 +295,8 @@ void LoadSettings() {
     WindhawkUtils::StringSetting transition(
         Wh_GetStringSetting(L"borderTransition"));
     g_settings.borderFade = ParseBorderTransition(transition);
+    g_settings.borderFramelessOnly =
+        Wh_GetIntSetting(L"borderFramelessOnly") != 0;
     g_settings.borderFadeDuration =
         ClampedSetting(Wh_GetIntSetting(L"borderFadeDuration"),
                        kDefaultBorderFade, 1, 2000);

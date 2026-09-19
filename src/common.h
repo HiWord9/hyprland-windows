@@ -126,6 +126,9 @@ struct Settings {
     std::atomic<COLORREF> borderActive{kColorUntouched};
     std::atomic<COLORREF> borderInactive{kColorUntouched};
     std::atomic<bool> borderFade{true};
+    // Off: the border colors apply to every window with a frame. On: only to
+    // the ones the mod has taken the title bar from.
+    std::atomic<bool> borderFramelessOnly{false};
     std::atomic<int> borderFadeDuration{kDefaultBorderFade};
     std::atomic<int> corners{DWMWCP_DEFAULT};
     std::atomic<SnapMode> snap{SnapMode::Both};
@@ -178,11 +181,24 @@ LRESULT AdjustHitTest(HWND hwnd, LRESULT hit, LPARAM lParam);
 ////////////////////////////////////////////////////////////////////////////////
 // DWM decorations
 
+bool BorderColorsWanted();
+bool IsBorderColorTarget(HWND hwnd);
 COLORREF AccentBorderColor();
 COLORREF BorderColorFor(bool active);
+// The border color last written to a window, which is where a fade starts
+// from. kColorUntouched when nothing of ours is on it.
+COLORREF CurrentBorderColor(HWND hwnd);
 bool IsBlendableColor(COLORREF color);
 COLORREF BlendColor(COLORREF from, COLORREF to, double t);
 void ApplyBorderColor(HWND hwnd, bool active);
+void RestoreBorderColor(HWND hwnd);
+void RefreshBorderColor(HWND hwnd);
+void RefreshBorderColors();
+void RestoreAllBorderColors();
+std::vector<HWND> SnapshotColoredWindows();
+void ForgetBorderColor(HWND hwnd);
+// A window's own thread reporting that it has gained or lost focus.
+void OnWindowActivation(HWND hwnd, bool active);
 // The border color on a focus change, faded across instead of switched.
 void AnimateBorderColor(HWND hwnd, bool active);
 bool IsBorderFading(HWND hwnd);
@@ -218,10 +234,6 @@ constexpr DWORD_PTR kRefKeepMenu = 1;
 bool IsFrameless(HWND hwnd);
 void MarkDwmTouched(HWND hwnd);
 bool IsDwmTouched(HWND hwnd);
-// The border color last written to a window, which is where a fade starts
-// from. kColorUntouched when nothing has been written to it.
-COLORREF CurrentBorderColor(HWND hwnd);
-void SetCurrentBorderColor(HWND hwnd, COLORREF color);
 std::vector<HWND> SnapshotFramelessWindows();
 std::vector<HWND> SnapshotAutoHiddenWindows();
 void RefreshFrame(HWND hwnd);
@@ -340,6 +352,7 @@ void OnWindowCreated(HWND hwnd, DWORD dwStyle);
 void InstallMessageHookForThread();
 void InstallMessageHooks();
 void RemoveMessageHooks();
+void RefreshCallWndProcHooks();
 
 using CreateWindowExW_t = decltype(&CreateWindowExW);
 using CreateWindowExA_t = decltype(&CreateWindowExA);

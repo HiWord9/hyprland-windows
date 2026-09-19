@@ -35,6 +35,7 @@ BOOL Wh_ModInit() {
 
 void Wh_ModAfterInit() {
     InstallMessageHooks();
+    RefreshBorderColors();
     if (g_settings.hideByDefault) {
         AutoHideExistingWindows();
     }
@@ -54,6 +55,7 @@ void Wh_ModBeforeUninit() {
     // And stop the border fades before the windows get their defaults back:
     // a color written after that would stay on the window for good.
     FinishBorderFades();
+    RestoreAllBorderColors();
 
     // A drag in progress has a subclass of ours on its window as well, and
     // the same rule applies to it: it has to come off on the window's own
@@ -105,8 +107,12 @@ void Wh_ModSettingsChanged() {
     LoadSettings();
 
     for (HWND hwnd : SnapshotFramelessWindows()) {
-        ApplyDwmAttributes(hwnd);
+        ApplyCorners(hwnd);
     }
+    // Which windows the border colors apply to is a setting of its own, so
+    // this goes over all of them rather than over the frameless ones.
+    RefreshCallWndProcHooks();
+    RefreshBorderColors();
 
     if (g_settings.hideByDefault) {
         AutoHideExistingWindows();

@@ -61,9 +61,60 @@ COLORREF BlendColor(COLORREF from, COLORREF to, double t) {
     return channel(0) | channel(8) | channel(16);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// Which windows carry a border color of ours
+//
+// Every window with a frame, or only the ones the mod has taken the title bar
+// from when the setting says so. The bookkeeping lives here rather than with
+// the title bars, because a window with a border color of ours is not
+// necessarily one the mod has touched in any other way - and the color it
+// last got is where a fade to the other one starts from.
+
+std::mutex g_coloredMutex;
+std::unordered_map<HWND, COLORREF> g_colored;
+
+bool BorderColorsWanted() {
+    return g_settings.borderActive != kColorUntouched ||
+           g_settings.borderInactive != kColorUntouched;
+}
+
+bool IsBorderColorTarget(HWND hwnd) {
+    if (!BorderColorsWanted()) {
+        return false;
+    }
+    return g_settings.borderFramelessOnly ? IsFrameless(hwnd)
+                                          : IsFrameWindow(hwnd);
+}
+
+COLORREF CurrentBorderColor(HWND hwnd) {
+    std::lock_guard<std::mutex> lock(g_coloredMutex);
+    auto it = g_colored.find(hwnd);
+    return it == g_colored.end() ? kColorUntouched : it->second;
+}
+
+void ForgetBorderColor(HWND hwnd) {
+    std::lock_guard<std::mutex> lock(g_coloredMutex);
+    g_colored.erase(hwnd);
+}
+
+std::vector<HWND> SnapshotColoredWindows() {
+    std::lock_guard<std::mutex> lock(g_coloredMutex);
+    std::vector<HWND> result;
+    result.reserve(g_colored.size());
+    for (const auto& [hwnd, color] : g_colored) {
+        result.push_back(hwnd);
+    }
+    return result;
+}
+
 void WriteBorderColor(HWND hwnd, COLORREF color) {
     DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &color, sizeof(color));
-    SetCurrentBorderColor(hwnd, color);
+    if (color == (COLORREF)DWMWA_COLOR_DEFAULT) {
+        ForgetBorderColor(hwnd);  // the border is the system's own again
+        return;
+    }
+    std::lock_guard<std::mutex> lock(g_coloredMutex);
+    g_colored[hwnd] = color;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -180,17 +231,67 @@ DWORD WINAPI BorderFadeThread(LPVOID param) {
 void ApplyBorderColor(HWND hwnd, bool active) {
     CancelBorderFade(hwnd);
 
-    COLORREF activeColor = g_settings.borderActive;
-    COLORREF inactiveColor = g_settings.borderInactive;
-    bool anyColor =
-        activeColor != kColorUntouched || inactiveColor != kColorUntouched;
-    if (!anyColor && !IsDwmTouched(hwnd)) {
+    COLORREF target = BorderColorFor(active);
+    if (target == (COLORREF)DWMWA_COLOR_DEFAULT &&
+        CurrentBorderColor(hwnd) == kColorUntouched) {
         return;  // nothing to set, and nothing of ours to undo
     }
+    WriteBorderColor(hwnd, target);
+}
 
-    WriteBorderColor(hwnd, BorderColorFor(active));
-    if (anyColor) {
-        MarkDwmTouched(hwnd);
+// Hands the border back to the system, if the mod had it at all.
+void RestoreBorderColor(HWND hwnd) {
+    CancelBorderFade(hwnd);
+    if (CurrentBorderColor(hwnd) == kColorUntouched) {
+        return;
+    }
+    WriteBorderColor(hwnd, (COLORREF)DWMWA_COLOR_DEFAULT);
+}
+
+// Puts one window's border where the settings say it belongs: colored when it
+// is a window they apply to, and the system's own when it is not one any more.
+void RefreshBorderColor(HWND hwnd) {
+    if (IsBorderColorTarget(hwnd)) {
+        ApplyBorderColor(hwnd, GetForegroundWindow() == hwnd);
+    } else {
+        RestoreBorderColor(hwnd);
+    }
+}
+
+// What a window's own thread reports through the hook on sent messages, which
+// is the only place a window that the mod has not otherwise touched says
+// anything about its focus - see hooks.cpp.
+void OnWindowActivation(HWND hwnd, bool active) {
+    if (IsBorderColorTarget(hwnd)) {
+        AnimateBorderColor(hwnd, active);
+    }
+}
+
+BOOL CALLBACK RefreshBorderColorProc(HWND hwnd, LPARAM lParam) {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (pid == (DWORD)lParam) {
+        RefreshBorderColor(hwnd);
+    }
+    return TRUE;
+}
+
+// Every window of this process at once: at start-up, and whenever the
+// settings change what the answer is.
+void RefreshBorderColors() {
+    for (HWND hwnd : SnapshotColoredWindows()) {
+        if (!IsBorderColorTarget(hwnd)) {
+            RestoreBorderColor(hwnd);
+        }
+    }
+    EnumWindows(RefreshBorderColorProc, (LPARAM)GetCurrentProcessId());
+}
+
+// The teardown. DwmSetWindowAttribute sends the window nothing, so unlike a
+// subclass this needs no round trip to anybody's thread.
+void RestoreAllBorderColors() {
+    for (HWND hwnd : SnapshotColoredWindows()) {
+        RestoreBorderColor(hwnd);
     }
 }
 
@@ -267,14 +368,14 @@ void ApplyCorners(HWND hwnd) {
 }
 
 void ApplyDwmAttributes(HWND hwnd) {
-    ApplyBorderColor(hwnd, GetForegroundWindow() == hwnd);
+    RefreshBorderColor(hwnd);
     ApplyCorners(hwnd);
 }
 
+// The corners go back with the title bar; the border color is decided by
+// whether the window is still one the colors apply to, which is not the same
+// question any more.
 void RestoreDwmAttributes(HWND hwnd) {
-    CancelBorderFade(hwnd);
-    COLORREF color = DWMWA_COLOR_DEFAULT;
-    DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &color, sizeof(color));
     int corners = DWMWCP_DEFAULT;
     DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corners,
                           sizeof(corners));

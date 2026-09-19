@@ -6,9 +6,6 @@ UINT g_msgFrameless;  // RegisterWindowMessage, set in Wh_ModInit
 
 struct FramelessState {
     bool dwmTouched = false;
-    // The border color last written to the window: where a fade to the other
-    // one starts from.
-    COLORREF borderColor = kColorUntouched;
     // The title bar was hidden by "hide by default", not by the hotkey, so
     // turning that setting off brings it back.
     bool autoHidden = false;
@@ -37,19 +34,6 @@ bool IsDwmTouched(HWND hwnd) {
     return it != g_windows.end() && it->second.dwmTouched;
 }
 
-COLORREF CurrentBorderColor(HWND hwnd) {
-    std::lock_guard<std::mutex> lock(g_windowsMutex);
-    auto it = g_windows.find(hwnd);
-    return it == g_windows.end() ? kColorUntouched : it->second.borderColor;
-}
-
-void SetCurrentBorderColor(HWND hwnd, COLORREF color) {
-    std::lock_guard<std::mutex> lock(g_windowsMutex);
-    auto it = g_windows.find(hwnd);
-    if (it != g_windows.end()) {
-        it->second.borderColor = color;
-    }
-}
 
 std::vector<HWND> SnapshotFramelessWindows() {
     std::lock_guard<std::mutex> lock(g_windowsMutex);
@@ -100,16 +84,6 @@ LRESULT CALLBACK FramelessSubclassProc(HWND hwnd,
             LRESULT hit = DefSubclassProc(hwnd, uMsg, wParam, lParam);
             return keepMenu ? hit : AdjustHitTest(hwnd, hit, lParam);
         }
-
-        case WM_NCACTIVATE:
-            AnimateBorderColor(hwnd, wParam != FALSE);
-            break;
-
-        case WM_DWMCOLORIZATIONCOLORCHANGED:
-            // The accent color moved, so a border set to "accent" follows it.
-            // At once, not faded: this is not a focus change.
-            ApplyBorderColor(hwnd, GetForegroundWindow() == hwnd);
-            break;
 
         case WM_NCDESTROY: {
             RemoveWindowSubclass(hwnd, FramelessSubclassProc, uIdSubclass);
@@ -207,6 +181,7 @@ void RestoreFrame(HWND hwnd) {
     if (state.dwmTouched) {
         RestoreDwmAttributes(hwnd);
     }
+    RefreshBorderColor(hwnd);
     RefreshFrame(hwnd);
     Wh_Log(L"Title bar restored for %p", hwnd);
 }

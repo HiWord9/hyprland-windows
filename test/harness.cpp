@@ -1203,6 +1203,12 @@ static void TestMoveResize() {
 ////////////////////////////////////////////////////////////////////////////////
 // The border color, and the fade between the two of them
 
+// A message sent to a window, the way the hook on sent messages sees it.
+static void SendThroughHook(HWND hwnd, UINT message, WPARAM wParam) {
+    CWPSTRUCT sent{0, wParam, message, hwnd};
+    CallWndProc(HC_ACTION, 0, (LPARAM)&sent);
+}
+
 static void TestBorderFade() {
     printf("\n== border color fade ==\n");
 
@@ -1217,7 +1223,8 @@ static void TestBorderFade() {
     RequestFrameless(hwnd, kActionHide);
     Pump(300);
     CHECK(IsFrameless(hwnd), "the test window has a hidden title bar");
-    CHECK(IsDwmTouched(hwnd), "and a border color of ours");
+    CHECK(CurrentBorderColor(hwnd) != kColorUntouched,
+          "and a border color of ours");
     CHECK(!IsBorderFading(hwnd),
           "taking the frame over sets the color outright");
 
@@ -1225,7 +1232,7 @@ static void TestBorderFade() {
     // switching, and lands exactly on it.
     ApplyBorderColor(hwnd, false);
     CHECK(CurrentBorderColor(hwnd) == kInactive, "starting from inactive");
-    SendMessageW(hwnd, WM_NCACTIVATE, TRUE, 0);
+    OnWindowActivation(hwnd, true);
     CHECK(IsBorderFading(hwnd), "activation starts a fade");
     Sleep(120);
     COLORREF mid = CurrentBorderColor(hwnd);
@@ -1240,12 +1247,12 @@ static void TestBorderFade() {
 
     // Focus leaving and coming back mid-fade turns the color around from
     // where it is, rather than jumping to the far end first.
-    SendMessageW(hwnd, WM_NCACTIVATE, FALSE, 0);
+    OnWindowActivation(hwnd, false);
     Sleep(100);
     COLORREF turning = CurrentBorderColor(hwnd);
     CHECK(turning != kActive && turning != kInactive,
           "a fade back starts where the color was (0x%06lX)", turning);
-    SendMessageW(hwnd, WM_NCACTIVATE, TRUE, 0);
+    OnWindowActivation(hwnd, true);
     Sleep(40);
     COLORREF returning = CurrentBorderColor(hwnd);
     CHECK(IsBorderFading(hwnd) && returning != kActive,
@@ -1258,7 +1265,7 @@ static void TestBorderFade() {
 
     // Instant when asked for.
     g_settings.borderFade = false;
-    SendMessageW(hwnd, WM_NCACTIVATE, FALSE, 0);
+    OnWindowActivation(hwnd, false);
     CHECK(!IsBorderFading(hwnd) && CurrentBorderColor(hwnd) == kInactive,
           "the setting switches the color at once instead");
     g_settings.borderFade = true;
@@ -1267,7 +1274,7 @@ static void TestBorderFade() {
     // system default are states, not colors.
     ApplyBorderColor(hwnd, true);
     g_settings.borderInactive = DWMWA_COLOR_NONE;
-    SendMessageW(hwnd, WM_NCACTIVATE, FALSE, 0);
+    OnWindowActivation(hwnd, false);
     CHECK(!IsBorderFading(hwnd) &&
               CurrentBorderColor(hwnd) == (COLORREF)DWMWA_COLOR_NONE,
           "no border is not a color to fade to (0x%06lX)",
@@ -1283,7 +1290,7 @@ static void TestBorderFade() {
     // wallpaper moves on its own, and the fade is heading for the one that
     // was there when focus changed.
     COLORREF accentThen = AccentBorderColor();
-    SendMessageW(hwnd, WM_NCACTIVATE, TRUE, 0);
+    OnWindowActivation(hwnd, true);
     CHECK(IsBorderFading(hwnd), "an accent border fades too");
     for (int i = 0; i < 40 && IsBorderFading(hwnd); i++) {
         Sleep(25);
@@ -1296,8 +1303,8 @@ static void TestBorderFade() {
     // for focus to go anywhere. Both sides are the accent here, so it does
     // not matter which of them this window is entitled to.
     g_settings.borderInactive = kColorAccent;
-    SetCurrentBorderColor(hwnd, RGB(1, 2, 3));  // as if the accent had moved
-    SendMessageW(hwnd, WM_DWMCOLORIZATIONCOLORCHANGED, 0, 0);
+    WriteBorderColor(hwnd, RGB(1, 2, 3));  // as if the accent had moved
+    SendThroughHook(hwnd, WM_DWMCOLORIZATIONCOLORCHANGED, 0);
     CHECK(CurrentBorderColor(hwnd) == AccentBorderColor() &&
               !IsBorderFading(hwnd),
           "an accent change re-applies the border color at once");
@@ -1307,7 +1314,7 @@ static void TestBorderFade() {
     // A title bar coming back stops the fade: the restore writes the system
     // default, and a color landing after that would stay on the window.
     ApplyBorderColor(hwnd, false);
-    SendMessageW(hwnd, WM_NCACTIVATE, TRUE, 0);
+    OnWindowActivation(hwnd, true);
     CHECK(IsBorderFading(hwnd), "a fade is running");
     RequestFrameless(hwnd, kActionShow);
     Pump(200);
@@ -1318,7 +1325,7 @@ static void TestBorderFade() {
     RequestFrameless(hwnd, kActionHide);
     Pump(300);
     ApplyBorderColor(hwnd, false);
-    SendMessageW(hwnd, WM_NCACTIVATE, TRUE, 0);
+    OnWindowActivation(hwnd, true);
     CHECK(IsBorderFading(hwnd), "a fade is running again");
     g_uninitializing = true;
     FinishBorderFades();
@@ -1332,6 +1339,88 @@ static void TestBorderFade() {
     g_settings.borderActive = kColorUntouched;
     g_settings.borderInactive = kColorUntouched;
     g_settings.borderFadeDuration = kDefaultBorderFade;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Which windows the border colors reach
+
+static void TestBorderScope() {
+    printf("\n== border color scope ==\n");
+
+    const COLORREF kActive = RGB(0x11, 0x99, 0x44);
+    g_settings.borderActive = kActive;
+    g_settings.borderInactive = RGB(0x22, 0x22, 0x22);
+    g_settings.borderFramelessOnly = false;
+
+    HWND plain = CreateTestWindow(L"Hypr border scope", false, 280, 200);
+    CHECK(!IsFrameless(plain), "the window still has its title bar");
+    CHECK(IsBorderColorTarget(plain),
+          "and the colors apply to it all the same");
+
+    OnWindowActivation(plain, true);
+    for (int i = 0; i < 40 && IsBorderFading(plain); i++) {
+        Sleep(25);
+    }
+    CHECK(CurrentBorderColor(plain) == kActive,
+          "focus paints it the active color (0x%06lX)",
+          CurrentBorderColor(plain));
+
+    // Only the windows the mod has taken the title bar from, when asked.
+    g_settings.borderFramelessOnly = true;
+    CHECK(!IsBorderColorTarget(plain), "the setting takes it back out again");
+    RefreshBorderColors();
+    CHECK(CurrentBorderColor(plain) == kColorUntouched,
+          "and its border goes back to the system's own");
+    OnWindowActivation(plain, false);
+    CHECK(CurrentBorderColor(plain) == kColorUntouched,
+          "with focus no longer painting it either");
+
+    RequestFrameless(plain, kActionHide);
+    Pump(300);
+    CHECK(IsFrameless(plain) && IsBorderColorTarget(plain),
+          "a window with its title bar hidden is still one of them");
+    OnWindowActivation(plain, true);
+    for (int i = 0; i < 40 && IsBorderFading(plain); i++) {
+        Sleep(25);
+    }
+    CHECK(CurrentBorderColor(plain) == kActive, "and is painted again");
+
+    // The title bar coming back takes the color with it, in this mode.
+    RequestFrameless(plain, kActionShow);
+    Pump(300);
+    CHECK(!IsFrameless(plain) && CurrentBorderColor(plain) == kColorUntouched,
+          "and loses it when the title bar comes back");
+
+    // The teardown hands every colored window back, wherever it came from.
+    g_settings.borderFramelessOnly = false;
+    OnWindowActivation(plain, true);
+    for (int i = 0; i < 40 && IsBorderFading(plain); i++) {
+        Sleep(25);
+    }
+    CHECK(CurrentBorderColor(plain) == kActive, "painted once more");
+    CHECK(SnapshotColoredWindows().size() >= 1, "and counted as painted");
+    RestoreAllBorderColors();
+    CHECK(CurrentBorderColor(plain) == kColorUntouched &&
+              SnapshotColoredWindows().empty(),
+          "which the teardown undoes for all of them at once");
+
+    // A window that goes away is forgotten about.
+    OnWindowActivation(plain, true);
+    for (int i = 0; i < 40 && IsBorderFading(plain); i++) {
+        Sleep(25);
+    }
+    CHECK(CurrentBorderColor(plain) != kColorUntouched, "painted again");
+    SendThroughHook(plain, WM_NCDESTROY, 0);
+    CHECK(CurrentBorderColor(plain) == kColorUntouched,
+          "and dropped when the window is destroyed");
+
+    g_settings.borderActive = kColorUntouched;
+    g_settings.borderInactive = kColorUntouched;
+    CHECK(!BorderColorsWanted(),
+          "with no colors set there is nothing to listen for");
+    RestoreAllBorderColors();
+    DestroyWindow(plain);
+    Pump(100);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1870,6 +1959,7 @@ int main(int argc, char** argv) {
     TestMessageHook();
     TestAutoHide();
     TestBorderFade();
+    TestBorderScope();
     TestSnapGeometry();
     TestGestures();
     TestResizeRelease();

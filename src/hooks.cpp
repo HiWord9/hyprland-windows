@@ -92,8 +92,19 @@ void ProcessRetrievedMessage(MSG* msg) {
 ////////////////////////////////////////////////////////////////////////////////
 // The message hook, one per message-pumping thread of this process
 
+// Two hooks per pumping thread. The first is for the messages an application
+// retrieves; the second is for the ones sent to its windows, which never go
+// near a queue - a window says that it has gained or lost focus by being sent
+// WM_NCACTIVATE, and that is the only word the mod gets about a window it has
+// not otherwise touched. The second one is only installed when there is a
+// border color to paint with, because until then it listens for nothing.
+struct ThreadHooks {
+    HHOOK getMessage = nullptr;
+    HHOOK callWndProc = nullptr;
+};
+
 std::mutex g_messageHooksMutex;
-std::unordered_map<DWORD, HHOOK> g_messageHooks;  // thread id -> its hook
+std::unordered_map<DWORD, ThreadHooks> g_messageHooks;
 
 // Set once per thread, so the common case - a thread that has its hook
 // already - costs nothing. With "*" as the include pattern this runs for every
@@ -114,20 +125,54 @@ LRESULT CALLBACK GetMessageProc(int code, WPARAM wParam, LPARAM lParam) {
     return CallNextHookEx(nullptr, code, wParam, lParam);
 }
 
+LRESULT CALLBACK CallWndProc(int code, WPARAM wParam, LPARAM lParam) {
+    ModRef ref;  // the image must not go away under this procedure
+
+    if (code == HC_ACTION && lParam && !g_uninitializing) {
+        auto* sent = reinterpret_cast<CWPSTRUCT*>(lParam);
+        switch (sent->message) {
+            case WM_NCACTIVATE:
+                OnWindowActivation(sent->hwnd, sent->wParam != FALSE);
+                break;
+            case WM_DWMCOLORIZATIONCOLORCHANGED:
+                // The accent color moved, so a border set to "accent" follows
+                // it. At once, not faded: this is not a focus change.
+                if (IsBorderColorTarget(sent->hwnd)) {
+                    ApplyBorderColor(sent->hwnd,
+                                     GetForegroundWindow() == sent->hwnd);
+                }
+                break;
+            case WM_NCDESTROY:
+                ForgetBorderColor(sent->hwnd);
+                break;
+        }
+    }
+    return CallNextHookEx(nullptr, code, wParam, lParam);
+}
+
 // Callers hold g_messageHooksMutex, which is also what keeps an installation
 // from slipping past the removal at uninit.
 void InstallMessageHookLocked(DWORD threadId) {
-    if (g_uninitializing || g_messageHooks.count(threadId)) {
+    if (g_uninitializing) {
         return;
     }
     // A thread hook on a thread of this process wants no module handle.
-    HHOOK hook =
-        SetWindowsHookExW(WH_GETMESSAGE, GetMessageProc, nullptr, threadId);
-    if (hook) {
-        g_messageHooks[threadId] = hook;
-    } else {
-        Wh_Log(L"WH_GETMESSAGE hook failed for thread %u (%u)", threadId,
-               GetLastError());
+    ThreadHooks& hooks = g_messageHooks[threadId];
+    if (!hooks.getMessage) {
+        hooks.getMessage =
+            SetWindowsHookExW(WH_GETMESSAGE, GetMessageProc, nullptr, threadId);
+        if (!hooks.getMessage) {
+            Wh_Log(L"WH_GETMESSAGE hook failed for thread %u (%u)", threadId,
+                   GetLastError());
+        }
+    }
+    if (!hooks.callWndProc && BorderColorsWanted()) {
+        hooks.callWndProc =
+            SetWindowsHookExW(WH_CALLWNDPROC, CallWndProc, nullptr, threadId);
+        if (!hooks.callWndProc) {
+            Wh_Log(L"WH_CALLWNDPROC hook failed for thread %u (%u)", threadId,
+                   GetLastError());
+        }
     }
 }
 
@@ -161,10 +206,31 @@ void InstallMessageHooks() {
 
 void RemoveMessageHooks() {
     std::lock_guard<std::mutex> lock(g_messageHooksMutex);
-    for (const auto& [threadId, hook] : g_messageHooks) {
-        UnhookWindowsHookEx(hook);
+    for (const auto& [threadId, hooks] : g_messageHooks) {
+        if (hooks.getMessage) {
+            UnhookWindowsHookEx(hooks.getMessage);
+        }
+        if (hooks.callWndProc) {
+            UnhookWindowsHookEx(hooks.callWndProc);
+        }
     }
     g_messageHooks.clear();
+}
+
+// The settings can take the border colors away again, and then there is
+// nothing left for the hook on sent messages to listen for.
+void RefreshCallWndProcHooks() {
+    if (BorderColorsWanted()) {
+        InstallMessageHooks();
+        return;
+    }
+    std::lock_guard<std::mutex> lock(g_messageHooksMutex);
+    for (auto& [threadId, hooks] : g_messageHooks) {
+        if (hooks.callWndProc) {
+            UnhookWindowsHookEx(hooks.callWndProc);
+            hooks.callWndProc = nullptr;
+        }
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
