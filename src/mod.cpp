@@ -51,6 +51,10 @@ void Wh_ModBeforeUninit() {
     RemoveMessageHooks();
     ShutdownWinMask();
 
+    // And stop the border fades before the windows get their defaults back:
+    // a color written after that would stay on the window for good.
+    FinishBorderFades();
+
     // Restore synchronously on each window's thread, so that no subclass
     // procedure is left behind once the DLL is gone. A subclass procedure in
     // an unmapped image crashes its application the next time the window gets

@@ -353,6 +353,37 @@ static void TestParsers() {
     CHECK(ParseMenuBarMode(L"skip") == MenuBarMode::Skip, "menu mode skip");
     CHECK(ParseMenuBarMode(L"") == MenuBarMode::Hide, "menu mode default");
 
+    CHECK(ParseBorderTransition(L""), "border transition defaults to the fade");
+    CHECK(ParseBorderTransition(L"fade"), "border transition fade");
+    CHECK(!ParseBorderTransition(L"instant"), "border transition instant");
+    CHECK(!ParseBorderTransition(L" OFF "), "border transition off");
+
+    CHECK(AnimationProgress(0, 100) == 0.0, "an animation starts at zero");
+    CHECK(AnimationProgress(100, 100) == 1.0, "and is done at its duration");
+    CHECK(AnimationProgress(150, 100) == 1.0, "past which it stays done");
+    CHECK(AnimationProgress(0, 0) == 1.0, "a zero-length one is done at once");
+    double halfway = AnimationProgress(50, 100);
+    CHECK(halfway > 0.49 && halfway < 0.51, "halfway is halfway (%.3f)",
+          halfway);
+    CHECK(AnimationProgress(25, 100) < 0.25 &&
+              AnimationProgress(75, 100) > 0.75,
+          "and it eases in and out");
+
+    CHECK(BlendColor(RGB(0, 0, 0), RGB(255, 255, 255), 0.0) == RGB(0, 0, 0),
+          "a blend starts on the first color");
+    CHECK(BlendColor(RGB(0, 0, 0), RGB(255, 255, 255), 1.0) ==
+              RGB(255, 255, 255),
+          "and ends on the second");
+    CHECK(BlendColor(RGB(0, 0, 0), RGB(200, 100, 50), 0.5) ==
+              RGB(100, 50, 25),
+          "every channel on its own (0x%06lX)",
+          BlendColor(RGB(0, 0, 0), RGB(200, 100, 50), 0.5));
+    CHECK(IsBlendableColor(RGB(1, 2, 3)), "a color can be blended");
+    CHECK(!IsBlendableColor(DWMWA_COLOR_NONE), "\"no border\" cannot");
+    CHECK(!IsBlendableColor(kColorUntouched), "neither can \"untouched\"");
+    CHECK(!IsBlendableColor((COLORREF)DWMWA_COLOR_DEFAULT),
+          "nor the system default");
+
     RECT rc{100, 100, 300, 300};
     CHECK(ResizeEdgeForPoint(rc, {120, 120}) == WMSZ_TOPLEFT, "corner top-left");
     CHECK(ResizeEdgeForPoint(rc, {280, 120}) == WMSZ_TOPRIGHT,
@@ -1093,6 +1124,110 @@ static void TestMoveResize() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// The border color, and the fade between the two of them
+
+static void TestBorderFade() {
+    printf("\n== border color fade ==\n");
+
+    const COLORREF kActive = RGB(0x33, 0xcc, 0xff);
+    const COLORREF kInactive = RGB(0x20, 0x20, 0x20);
+    g_settings.borderActive = kActive;
+    g_settings.borderInactive = kInactive;
+    g_settings.borderFade = true;
+    g_settings.borderFadeDuration = 300;
+
+    HWND hwnd = CreateTestWindow(L"Hypr border test", false, 220, 220);
+    RequestFrameless(hwnd, kActionHide);
+    Pump(300);
+    CHECK(IsFrameless(hwnd), "the test window has a hidden title bar");
+    CHECK(IsDwmTouched(hwnd), "and a border color of ours");
+    CHECK(!IsBorderFading(hwnd),
+          "taking the frame over sets the color outright");
+
+    // Focus arriving crosses to the other color over time instead of
+    // switching, and lands exactly on it.
+    ApplyBorderColor(hwnd, false);
+    CHECK(CurrentBorderColor(hwnd) == kInactive, "starting from inactive");
+    SendMessageW(hwnd, WM_NCACTIVATE, TRUE, 0);
+    CHECK(IsBorderFading(hwnd), "activation starts a fade");
+    Sleep(120);
+    COLORREF mid = CurrentBorderColor(hwnd);
+    CHECK(mid != kInactive && mid != kActive,
+          "which is somewhere in between on the way (0x%06lX)", mid);
+    for (int i = 0; i < 40 && IsBorderFading(hwnd); i++) {
+        Sleep(25);
+    }
+    CHECK(CurrentBorderColor(hwnd) == kActive,
+          "and lands exactly on the active color (0x%06lX)",
+          CurrentBorderColor(hwnd));
+
+    // Focus leaving and coming back mid-fade turns the color around from
+    // where it is, rather than jumping to the far end first.
+    SendMessageW(hwnd, WM_NCACTIVATE, FALSE, 0);
+    Sleep(100);
+    COLORREF turning = CurrentBorderColor(hwnd);
+    CHECK(turning != kActive && turning != kInactive,
+          "a fade back starts where the color was (0x%06lX)", turning);
+    SendMessageW(hwnd, WM_NCACTIVATE, TRUE, 0);
+    Sleep(40);
+    COLORREF returning = CurrentBorderColor(hwnd);
+    CHECK(IsBorderFading(hwnd) && returning != kActive,
+          "and is turned around again without a jump (0x%06lX)", returning);
+    for (int i = 0; i < 40 && IsBorderFading(hwnd); i++) {
+        Sleep(25);
+    }
+    CHECK(CurrentBorderColor(hwnd) == kActive,
+          "landing on the color the last focus change asked for");
+
+    // Instant when asked for.
+    g_settings.borderFade = false;
+    SendMessageW(hwnd, WM_NCACTIVATE, FALSE, 0);
+    CHECK(!IsBorderFading(hwnd) && CurrentBorderColor(hwnd) == kInactive,
+          "the setting switches the color at once instead");
+    g_settings.borderFade = true;
+
+    // And instant when there is nothing to fade through: "no border" and the
+    // system default are states, not colors.
+    ApplyBorderColor(hwnd, true);
+    g_settings.borderInactive = DWMWA_COLOR_NONE;
+    SendMessageW(hwnd, WM_NCACTIVATE, FALSE, 0);
+    CHECK(!IsBorderFading(hwnd) &&
+              CurrentBorderColor(hwnd) == (COLORREF)DWMWA_COLOR_NONE,
+          "no border is not a color to fade to (0x%06lX)",
+          CurrentBorderColor(hwnd));
+    g_settings.borderInactive = kInactive;
+
+    // A title bar coming back stops the fade: the restore writes the system
+    // default, and a color landing after that would stay on the window.
+    ApplyBorderColor(hwnd, false);
+    SendMessageW(hwnd, WM_NCACTIVATE, TRUE, 0);
+    CHECK(IsBorderFading(hwnd), "a fade is running");
+    RequestFrameless(hwnd, kActionShow);
+    Pump(200);
+    CHECK(!IsFrameless(hwnd) && !IsBorderFading(hwnd),
+          "restoring the title bar stops it");
+
+    // So does the teardown, which waits for it before restoring anything.
+    RequestFrameless(hwnd, kActionHide);
+    Pump(300);
+    ApplyBorderColor(hwnd, false);
+    SendMessageW(hwnd, WM_NCACTIVATE, TRUE, 0);
+    CHECK(IsBorderFading(hwnd), "a fade is running again");
+    g_uninitializing = true;
+    FinishBorderFades();
+    CHECK(!IsBorderFading(hwnd), "and the teardown waits it out");
+    g_uninitializing = false;
+
+    RequestFrameless(hwnd, kActionShow);
+    Pump(200);
+    DestroyWindow(hwnd);
+    Pump(100);
+    g_settings.borderActive = kColorUntouched;
+    g_settings.borderInactive = kColorUntouched;
+    g_settings.borderFadeDuration = kDefaultBorderFade;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // The release that ends a resize
 
 static void TestResizeRelease() {
@@ -1306,6 +1441,7 @@ int main(int argc, char** argv) {
     TestFramelessGeometry(true, MenuBarMode::KeepMenu);
     TestMessageHook();
     TestAutoHide();
+    TestBorderFade();
     TestResizeRelease();
     TestDragFade();
     if (!noInput) {

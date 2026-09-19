@@ -45,6 +45,23 @@ struct ModRef {
 };
 
 ////////////////////////////////////////////////////////////////////////////////
+// Animation
+
+// How far along an animation is, eased in and out (smoothstep) so that a short
+// one reads as a movement rather than a jump. Every animation in the mod runs
+// on this curve, so they all feel like the same piece of work.
+inline double AnimationProgress(int elapsedMs, int durationMs) {
+    if (durationMs <= 0 || elapsedMs >= durationMs) {
+        return 1.0;
+    }
+    if (elapsedMs <= 0) {
+        return 0.0;
+    }
+    double t = (double)elapsedMs / durationMs;
+    return t * t * (3.0 - 2.0 * t);
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Settings
 
 enum class DragModifier { Win, Alt };
@@ -62,6 +79,10 @@ constexpr int kDefaultDragOpacity = 85;
 constexpr int kDefaultDragFadeIn = 120;
 constexpr int kDefaultDragFadeOut = 60;
 
+// How long the border color takes to cross from one setting to the other when
+// focus moves. Zero means the default here too.
+constexpr int kDefaultBorderFade = 150;
+
 struct Settings {
     std::atomic<UINT> hotkeyVk{0};
     std::atomic<bool> hotkeyCtrl{true};
@@ -78,6 +99,8 @@ struct Settings {
     std::atomic<bool> hideByDefault{false};
     std::atomic<COLORREF> borderActive{kColorUntouched};
     std::atomic<COLORREF> borderInactive{kColorUntouched};
+    std::atomic<bool> borderFade{true};
+    std::atomic<int> borderFadeDuration{kDefaultBorderFade};
     std::atomic<int> corners{DWMWCP_DEFAULT};
 };
 
@@ -98,6 +121,7 @@ std::wstring NormalizeSettingString(PCWSTR raw);
 UINT ParseKeyName(PCWSTR raw);
 Hotkey ParseHotkey(PCWSTR raw);
 COLORREF ParseBorderColor(PCWSTR raw);
+bool ParseBorderTransition(PCWSTR raw);
 MenuBarMode ParseMenuBarMode(PCWSTR raw);
 int ParseCorners(PCWSTR raw);
 DragTranslucency ParseDragTranslucency(PCWSTR raw);
@@ -124,7 +148,15 @@ LRESULT AdjustHitTest(HWND hwnd, LRESULT hit, LPARAM lParam);
 ////////////////////////////////////////////////////////////////////////////////
 // DWM decorations
 
+COLORREF BorderColorFor(bool active);
+bool IsBlendableColor(COLORREF color);
+COLORREF BlendColor(COLORREF from, COLORREF to, double t);
 void ApplyBorderColor(HWND hwnd, bool active);
+// The border color on a focus change, faded across instead of switched.
+void AnimateBorderColor(HWND hwnd, bool active);
+bool IsBorderFading(HWND hwnd);
+void CancelBorderFade(HWND hwnd);
+void FinishBorderFades();
 void ApplyCorners(HWND hwnd);
 void ApplyDwmAttributes(HWND hwnd);
 void RestoreDwmAttributes(HWND hwnd);
@@ -155,6 +187,10 @@ constexpr DWORD_PTR kRefKeepMenu = 1;
 bool IsFrameless(HWND hwnd);
 void MarkDwmTouched(HWND hwnd);
 bool IsDwmTouched(HWND hwnd);
+// The border color last written to a window, which is where a fade starts
+// from. kColorUntouched when nothing has been written to it.
+COLORREF CurrentBorderColor(HWND hwnd);
+void SetCurrentBorderColor(HWND hwnd, COLORREF color);
 std::vector<HWND> SnapshotFramelessWindows();
 std::vector<HWND> SnapshotAutoHiddenWindows();
 void RefreshFrame(HWND hwnd);

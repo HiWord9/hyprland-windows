@@ -28,8 +28,12 @@ edges, dragging one to the top still offers the Windows 11 snap layouts, and
 `Esc` cancels a drag in progress. A window you are dragging fades to slightly
 translucent while you hold it, the way a Hyprland window does.
 
+Give the windows with a hidden title bar a border color and it fades from one
+color to the other as focus moves, the way a Hyprland border does.
+
 Everything is configurable in the settings - the hotkey, the modifier key, the
-translucency, and how much of the frame goes away with the title bar.
+translucency, the border, and how much of the frame goes away with the title
+bar.
 
 ## Good to know
 
@@ -108,6 +112,18 @@ translucency, and how much of the frame goes away with the title bar.
   $description: >-
     Only affects windows with a hidden title bar. "#RRGGBB" for a color, "none"
     for no border, empty for the system default.
+- borderTransition: fade
+  $name: Border color transition
+  $description: >-
+    What happens to the border color when a window gains or loses focus. Only
+    has anything to fade when both colors above are set to a color - "none"
+    and the system default are not colors to fade through.
+  $options:
+  - fade: Fade from one color to the other
+  - instant: Change at once
+- borderFadeDuration: 150
+  $name: Border fade time
+  $description: How long that fade takes, in milliseconds
 - corners: default
   $name: Corners of windows with a hidden title bar
   $options:

@@ -50,18 +50,10 @@ BYTE DragAlphaFor(BYTE baseAlpha, int opacityPercent) {
     return (BYTE)(baseAlpha * opacityPercent / 100);
 }
 
-// Smoothstep, so the fade eases in and out instead of starting and stopping
-// abruptly - which is what makes a 100 ms fade read as a fade at all.
 BYTE FadeAlphaAt(BYTE from, BYTE to, int durationMs, int elapsedMs) {
-    if (durationMs <= 0 || elapsedMs >= durationMs) {
-        return to;
-    }
-    if (elapsedMs <= 0) {
-        return from;
-    }
-    double t = (double)elapsedMs / durationMs;
-    t = t * t * (3.0 - 2.0 * t);
-    return (BYTE)(from + (to - from) * t + 0.5);
+    return (BYTE)(from + (to - from) *
+                             AnimationProgress(elapsedMs, durationMs) +
+                  0.5);
 }
 
 void SetFadeAlpha(const DragFadeWork& work, BYTE alpha) {

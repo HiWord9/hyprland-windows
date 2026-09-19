@@ -110,6 +110,13 @@ COLORREF ParseBorderColor(PCWSTR raw) {
     return RGB((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF);
 }
 
+// Anything but "instant" fades, so a setting Windhawk has never written out -
+// an empty string - means the fade is on, the way the settings say it is.
+bool ParseBorderTransition(PCWSTR raw) {
+    std::wstring s = NormalizeSettingString(raw);
+    return s != L"INSTANT" && s != L"OFF" && s != L"NONE";
+}
+
 MenuBarMode ParseMenuBarMode(PCWSTR raw) {
     std::wstring s = NormalizeSettingString(raw);
     if (s == L"KEEPMENU") {
@@ -228,6 +235,13 @@ void LoadSettings() {
         Wh_GetStringSetting(L"borderInactive"));
     g_settings.borderActive = ParseBorderColor(active);
     g_settings.borderInactive = ParseBorderColor(inactive);
+
+    WindhawkUtils::StringSetting transition(
+        Wh_GetStringSetting(L"borderTransition"));
+    g_settings.borderFade = ParseBorderTransition(transition);
+    g_settings.borderFadeDuration =
+        ClampedSetting(Wh_GetIntSetting(L"borderFadeDuration"),
+                       kDefaultBorderFade, 1, 2000);
 
     WindhawkUtils::StringSetting corners(Wh_GetStringSetting(L"corners"));
     g_settings.corners = ParseCorners(corners);

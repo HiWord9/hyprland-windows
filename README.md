@@ -48,7 +48,7 @@ and assembled into that single file:
 | `src/settings.cpp` | reading and parsing the settings |
 | `src/window_info.cpp` | which windows the mod may touch, plus window metrics |
 | `src/frame_geometry.cpp` | non-client layout of a window with a hidden title bar |
-| `src/decorations.cpp` | border color and corner preference |
+| `src/decorations.cpp` | border color (and the fade between the two of them) and corner preference |
 | `src/titlebar.cpp` | hiding/restoring a title bar and the per-window bookkeeping |
 | `src/hotkey.cpp` | the title-bar hotkey |
 | `src/startmenu.cpp` | keeping the Start menu shut after a `Win` + drag |

@@ -6,6 +6,9 @@ UINT g_msgFrameless;  // RegisterWindowMessage, set in Wh_ModInit
 
 struct FramelessState {
     bool dwmTouched = false;
+    // The border color last written to the window: where a fade to the other
+    // one starts from.
+    COLORREF borderColor = kColorUntouched;
     // The title bar was hidden by "hide by default", not by the hotkey, so
     // turning that setting off brings it back.
     bool autoHidden = false;
@@ -32,6 +35,20 @@ bool IsDwmTouched(HWND hwnd) {
     std::lock_guard<std::mutex> lock(g_windowsMutex);
     auto it = g_windows.find(hwnd);
     return it != g_windows.end() && it->second.dwmTouched;
+}
+
+COLORREF CurrentBorderColor(HWND hwnd) {
+    std::lock_guard<std::mutex> lock(g_windowsMutex);
+    auto it = g_windows.find(hwnd);
+    return it == g_windows.end() ? kColorUntouched : it->second.borderColor;
+}
+
+void SetCurrentBorderColor(HWND hwnd, COLORREF color) {
+    std::lock_guard<std::mutex> lock(g_windowsMutex);
+    auto it = g_windows.find(hwnd);
+    if (it != g_windows.end()) {
+        it->second.borderColor = color;
+    }
 }
 
 std::vector<HWND> SnapshotFramelessWindows() {
@@ -85,7 +102,7 @@ LRESULT CALLBACK FramelessSubclassProc(HWND hwnd,
         }
 
         case WM_NCACTIVATE:
-            ApplyBorderColor(hwnd, wParam != FALSE);
+            AnimateBorderColor(hwnd, wParam != FALSE);
             break;
 
         case WM_NCDESTROY: {
@@ -161,6 +178,10 @@ bool MakeFrameless(HWND hwnd, bool autoHidden) {
 }
 
 void RestoreFrame(HWND hwnd) {
+    // Before the bookkeeping goes away: a fade still running would write a
+    // color over the default this is about to put back.
+    CancelBorderFade(hwnd);
+
     FramelessState state;
     {
         std::lock_guard<std::mutex> lock(g_windowsMutex);
