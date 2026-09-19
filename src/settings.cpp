@@ -219,6 +219,14 @@ void LoadSettings() {
 
     g_settings.topEdgeResize = Wh_GetIntSetting(L"topEdgeResize") != 0;
 
+    WindhawkUtils::StringSetting doubleClick(
+        Wh_GetStringSetting(L"doubleClickAction"));
+    g_settings.doubleClickAction = ParseWindowAction(doubleClick);
+    // Zero is a value of its own here - "whatever the mouse settings say" -
+    // so it survives the clamp.
+    g_settings.doubleClickTime =
+        ClampedSetting(Wh_GetIntSetting(L"doubleClickTime"), 0, 100, 2000);
+
     WindhawkUtils::StringSetting translucency(
         Wh_GetStringSetting(L"dragTranslucency"));
     g_settings.dragTranslucency = ParseDragTranslucency(translucency);
@@ -260,4 +268,7 @@ void LoadSettings() {
            (int)g_settings.hideByDefault,
            (int)g_settings.dragTranslucency.load(),
            g_settings.dragOpacity.load());
+    Wh_Log(L"Settings: doubleClickAction=%d, doubleClickTime=%d (%d ms)",
+           (int)g_settings.doubleClickAction.load(),
+           g_settings.doubleClickTime.load(), DoubleClickTimeMs());
 }

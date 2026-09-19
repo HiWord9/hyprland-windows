@@ -40,6 +40,7 @@ MODULES = [
     "startmenu.cpp",
     "drag.cpp",
     "drag_fade.cpp",
+    "actions.cpp",
     "hooks.cpp",
     "mod.cpp",
 ]

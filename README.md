@@ -7,6 +7,9 @@ a mod for [Windhawk](https://windhawk.net/).
   its title bar.
 * **Win + right mouse button** — resize a window from anywhere on it, from
   whichever corner is closest to the cursor.
+* **Win + double click** — maximize a window, or restore it. The title bar is
+  gone, so the double click that used to be on it now works anywhere on the
+  window; the settings offer other things for it to do.
 * **Ctrl+Alt+H** — hide the focused window's title bar; press it again to bring
   the title bar back.
 
@@ -54,6 +57,7 @@ and assembled into that single file:
 | `src/startmenu.cpp` | keeping the Start menu shut after a `Win` + drag |
 | `src/drag.cpp` | `Win` + mouse move and resize |
 | `src/drag_fade.cpp` | fading a window to translucent while it is dragged |
+| `src/actions.cpp` | mouse gestures with the modifier held, and what they do |
 | `src/hooks.cpp` | the hooked APIs (messages, window creation) |
 | `src/mod.cpp` | the Windhawk lifecycle entry points |
 | `tools/bundle.py` | assembles all of the above into `build/hyprland-windows.wh.cpp` |

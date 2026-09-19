@@ -66,6 +66,8 @@ inline double AnimationProgress(int elapsedMs, int durationMs) {
 
 enum class DragModifier { Win, Alt };
 enum class MenuBarMode { Hide, KeepMenu, Skip };
+// What a mouse gesture with the modifier held does to a window.
+enum class WindowAction { None, ToggleMaximize, ToggleTitleBar, Close };
 // Which drags fade the window they are dragging.
 enum class DragTranslucency { Both, MoveOnly, Off };
 
@@ -95,6 +97,8 @@ struct Settings {
     std::atomic<bool> hotkeyWin{false};
     std::atomic<DragModifier> dragModifier{DragModifier::Win};
     std::atomic<bool> topEdgeResize{false};
+    std::atomic<WindowAction> doubleClickAction{WindowAction::ToggleMaximize};
+    std::atomic<int> doubleClickTime{0};  // 0: the Windows double-click speed
     std::atomic<DragTranslucency> dragTranslucency{DragTranslucency::Both};
     std::atomic<int> dragOpacity{kDefaultDragOpacity};
     std::atomic<int> dragFadeIn{kDefaultDragFadeIn};
@@ -129,6 +133,7 @@ bool ParseBorderTransition(PCWSTR raw);
 MenuBarMode ParseMenuBarMode(PCWSTR raw);
 int ParseCorners(PCWSTR raw);
 DragTranslucency ParseDragTranslucency(PCWSTR raw);
+WindowAction ParseWindowAction(PCWSTR raw);
 int ClampedSetting(int value, int fallback, int low, int high);
 void LoadSettings();
 
@@ -232,6 +237,9 @@ enum DragKind : WPARAM {
     // Not a drag: the drag is over, and the window's own thread is the only
     // one that may take the mod's WS_EX_LAYERED back off - see drag_fade.cpp.
     kDragUnfade = 2,
+    // Nor is this one: a gesture that asks the window to do something to
+    // itself, with the WindowAction in lParam - see actions.cpp.
+    kDragAction = 3,
 };
 
 // How long the thread that ends a resize waits for its loop to start. The
@@ -257,6 +265,17 @@ bool HandleDragRequest(MSG* msg);
 bool HandleModifierButtonDown(const MSG* msg, bool right);
 bool HandleButtonUp(bool right);
 bool HandleLeftButtonUp();
+
+////////////////////////////////////////////////////////////////////////////////
+// Gestures with the modifier held, and what they do to a window
+
+int DoubleClickTimeMs();
+// Whether this press and the one before it on this thread are a double click.
+// Takes the tick instead of reading the clock, so the rules are testable.
+bool IsDoubleClickAt(HWND root, POINT pt, DWORD tick);
+void ForgetLastPress();
+void DoWindowAction(HWND hwnd, WindowAction action);
+void RequestWindowAction(HWND root, WindowAction action);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Translucency while dragging

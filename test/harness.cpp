@@ -1132,6 +1132,48 @@ static void TestMoveResize() {
     CHECK(click.message == WM_LBUTTONDOWN,
           "click without modifier passes through");
 
+    // The double-click gesture through the real message path, seen the way an
+    // application sees it. With Alt as the modifier: holding Win here would
+    // open the Start menu if anything about the mask went wrong, and that is
+    // not what this is checking.
+    g_settings.dragModifier = DragModifier::Alt;
+    g_settings.doubleClickAction = WindowAction::ToggleMaximize;
+    ForgetLastPress();
+    RECT rGesture;
+    GetWindowRect(hwnd, &rGesture);
+    POINT mid{(rGesture.left + rGesture.right) / 2,
+              (rGesture.top + rGesture.bottom) / 2};
+    SetCursorPos(mid.x, mid.y);
+    PumpRaw(50);
+
+    INPUT alt{};
+    alt.type = INPUT_KEYBOARD;
+    alt.ki.wVk = VK_MENU;
+    SendInput(1, &alt, sizeof(alt));
+    std::thread clicker([] {
+        Sleep(60);
+        SendMouse(MOUSEEVENTF_LEFTDOWN);
+        Sleep(60);
+        SendMouse(MOUSEEVENTF_LEFTUP);
+        Sleep(60);
+        SendMouse(MOUSEEVENTF_LEFTDOWN);
+        Sleep(60);
+        SendMouse(MOUSEEVENTF_LEFTUP);
+    });
+    for (int i = 0; i < 14; i++) {
+        PumpRaw(50);
+    }
+    clicker.join();
+    alt.ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(1, &alt, sizeof(alt));
+    PumpRaw(200);
+
+    CHECK(IsZoomed(hwnd), "a double click with the modifier held maximized it");
+    ShowWindow(hwnd, SW_RESTORE);
+    PumpRaw(200);
+    g_settings.dragModifier = DragModifier::Win;
+    g_swallowButtonUp[0] = g_swallowButtonUp[1] = false;
+
     SetCursorPos(savedCursor.x, savedCursor.y);
     RemoveMessageHooks();
     DestroyWindow(hwnd);
@@ -1270,6 +1312,85 @@ static void TestBorderFade() {
     g_settings.borderActive = kColorUntouched;
     g_settings.borderInactive = kColorUntouched;
     g_settings.borderFadeDuration = kDefaultBorderFade;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Gestures: what a double click is, and what an action does
+
+static void TestGestures() {
+    printf("\n== gestures ==\n");
+
+    CHECK(ParseWindowAction(L"") == WindowAction::ToggleMaximize,
+          "the default action is maximize");
+    CHECK(ParseWindowAction(L"maximize") == WindowAction::ToggleMaximize,
+          "action maximize");
+    CHECK(ParseWindowAction(L"titleBar") == WindowAction::ToggleTitleBar,
+          "action titleBar");
+    CHECK(ParseWindowAction(L"close") == WindowAction::Close, "action close");
+    CHECK(ParseWindowAction(L"none") == WindowAction::None, "action none");
+    CHECK(ParseWindowAction(L" OFF ") == WindowAction::None, "action off");
+
+    int savedTime = g_settings.doubleClickTime;
+    g_settings.doubleClickTime = 0;
+    CHECK(DoubleClickTimeMs() == (int)GetDoubleClickTime(),
+          "zero follows the Windows double-click speed (%d ms)",
+          DoubleClickTimeMs());
+    g_settings.doubleClickTime = 250;
+    CHECK(DoubleClickTimeMs() == 250, "a time of its own is used as it is");
+
+    // The recognizer runs on given ticks, so its rules can be checked without
+    // waiting out a double-click time for each of them.
+    HWND one = (HWND)0x1111, other = (HWND)0x2222;
+    POINT pt{500, 500};
+    ForgetLastPress();
+    CHECK(!IsDoubleClickAt(one, pt, 1000), "one press is not a double click");
+    CHECK(IsDoubleClickAt(one, pt, 1200),
+          "a second one soon after and in the same place is");
+    CHECK(!IsDoubleClickAt(one, pt, 1300),
+          "a third click starts over instead of counting again");
+
+    ForgetLastPress();
+    IsDoubleClickAt(one, pt, 2000);
+    CHECK(!IsDoubleClickAt(one, pt, 2251), "too late is not a double click");
+
+    ForgetLastPress();
+    IsDoubleClickAt(one, pt, 3000);
+    POINT away{pt.x + GetSystemMetrics(SM_CXDOUBLECLK), pt.y};
+    CHECK(!IsDoubleClickAt(one, away, 3100), "and neither is too far away");
+
+    ForgetLastPress();
+    IsDoubleClickAt(one, pt, 4000);
+    CHECK(!IsDoubleClickAt(other, pt, 4100),
+          "nor a click that lands on another window");
+
+    ForgetLastPress();
+    IsDoubleClickAt(one, pt, 5000);
+    ForgetLastPress();
+    CHECK(!IsDoubleClickAt(one, pt, 5100), "a forgotten press counts for none");
+    g_settings.doubleClickTime = savedTime;
+
+    // And the actions themselves, asked for the way a gesture asks: posted to
+    // the window, carried out on its own thread.
+    HWND hwnd = CreateTestWindow(L"Hypr gesture test", false, 260, 260);
+    CHECK(!IsZoomed(hwnd), "the window starts out restored");
+    RequestWindowAction(hwnd, WindowAction::ToggleMaximize);
+    Pump(400);
+    CHECK(IsZoomed(hwnd), "the maximize action maximizes it");
+    RequestWindowAction(hwnd, WindowAction::ToggleMaximize);
+    Pump(400);
+    CHECK(!IsZoomed(hwnd), "and the same action restores it again");
+
+    RequestWindowAction(hwnd, WindowAction::ToggleTitleBar);
+    Pump(400);
+    CHECK(IsFrameless(hwnd), "the title bar action hides the title bar");
+    RequestWindowAction(hwnd, WindowAction::ToggleTitleBar);
+    Pump(400);
+    CHECK(!IsFrameless(hwnd), "and brings it back");
+
+    RequestWindowAction(hwnd, WindowAction::Close);
+    Pump(400);
+    CHECK(!IsWindow(hwnd), "the close action closes the window");
+    Pump(100);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1487,6 +1608,7 @@ int main(int argc, char** argv) {
     TestMessageHook();
     TestAutoHide();
     TestBorderFade();
+    TestGestures();
     TestResizeRelease();
     TestDragFade();
     if (!noInput) {

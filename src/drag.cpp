@@ -250,6 +250,13 @@ bool HandleDragRequest(MSG* msg) {
         return false;  // ours, and there is nothing to dispatch
     }
 
+    if (msg->wParam == kDragAction) {
+        if (!g_uninitializing && IsFrameWindow(root)) {
+            DoWindowAction(root, (WindowAction)msg->lParam);
+        }
+        return false;
+    }
+
     // Checked again here: the request came from another thread, possibly in
     // another process, so the window may no longer be what it was.
     if (g_uninitializing || !IsFrameWindow(root)) {
@@ -290,6 +297,19 @@ bool HandleModifierButtonDown(const MSG* msg, bool right) {
     }
     if (!IsFrameWindow(root)) {
         return false;  // desktop, taskbar, menus... - normal click
+    }
+
+    // The second press of a double click is a gesture of its own rather than
+    // another drag. The first one has already started a drag by then, which
+    // is what a double click on a title bar does in Windows as well.
+    WindowAction action = g_settings.doubleClickAction;
+    if (!right && action != WindowAction::None &&
+        IsDoubleClickAt(root, msg->pt, GetTickCount())) {
+        Wh_Log(L"Double click on %p", root);
+        ArmWinMask();
+        g_swallowButtonUp[0] = true;  // we took the press, so its release too
+        RequestWindowAction(root, action);
+        return true;
     }
 
     Wh_Log(L"%s %p", right ? L"Resize" : L"Move", root);
