@@ -163,6 +163,11 @@ SnapMode ParseSnapMode(PCWSTR raw) {
     return SnapMode::Both;
 }
 
+// "suppress" turns the extra key around: magnetic unless it is held.
+bool ParseSnapModifierHold(PCWSTR raw) {
+    return NormalizeSettingString(raw) != L"SUPPRESS";
+}
+
 UINT ParseModifierVk(PCWSTR raw, UINT whenEmpty) {
     std::wstring s = NormalizeSettingString(raw);
     if (s.empty()) {
@@ -309,6 +314,12 @@ void LoadSettings() {
     WindhawkUtils::StringSetting keepAspect(
         Wh_GetStringSetting(L"keepAspectModifier"));
     g_settings.keepAspectVk = ParseModifierVk(keepAspect, VK_SHIFT);
+    WindhawkUtils::StringSetting snapModifier(
+        Wh_GetStringSetting(L"snapModifier"));
+    g_settings.snapModifierVk = ParseModifierVk(snapModifier, VK_CONTROL);
+    WindhawkUtils::StringSetting snapModifierWhen(
+        Wh_GetStringSetting(L"snapModifierWhen"));
+    g_settings.snapModifierHold = ParseSnapModifierHold(snapModifierWhen);
 
     Hotkey key = g_settings.hotkey;
     Hotkey shortcutKey = g_settings.windowShortcut;

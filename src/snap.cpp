@@ -236,11 +236,25 @@ void ApplyAspectRatio(UINT edge, const RECT& start, RECT* rc) {
 
     bool horizontalOnly = edge == WMSZ_LEFT || edge == WMSZ_RIGHT;
     bool verticalOnly = edge == WMSZ_TOP || edge == WMSZ_BOTTOM;
-    if (horizontalOnly || (!verticalOnly && abs(width - startWidth) >=
-                                                abs(height - startHeight))) {
+    if (horizontalOnly) {
         height = (int)(width / ratio + 0.5);
-    } else {
+    } else if (verticalOnly) {
         width = (int)(height * ratio + 0.5);
+    } else {
+        // A corner follows both axes at once, so the size to take is the one
+        // on the shape's own line that is nearest to what the cursor asked
+        // for - its projection onto that line. Picking whichever axis moved
+        // further instead looks the same most of the time and jumps every
+        // time the two swap places, which is wherever the cursor happens to
+        // cross the diagonal.
+        double t = ((double)width * startWidth + (double)height * startHeight) /
+                   ((double)startWidth * startWidth +
+                    (double)startHeight * startHeight);
+        if (t < 0.0) {
+            t = 0.0;
+        }
+        width = (int)(startWidth * t + 0.5);
+        height = (int)(startHeight * t + 0.5);
     }
 
     if (EdgeMovesLeft(edge)) {
@@ -262,12 +276,38 @@ int SnapDistancePx(HWND hwnd) {
     return MulDiv(g_settings.snapDistance, (int)WindowDpi(hwnd), 96);
 }
 
+// Asked about globally rather than through the thread's own copy of the
+// keyboard state: these keys are pressed and let go of in the middle of a
+// drag, and what matters is whether the key is down now, not whether the
+// window's thread has got round to hearing about it.
+bool ModifierHeld(UINT vk) {
+    return vk != 0 && (GetAsyncKeyState((int)vk) & 0x8000) != 0;
+}
+
 bool KeepAspectHeld() {
-    UINT vk = g_settings.keepAspectVk;
-    return vk != 0 && GetKeyState((int)vk) < 0;
+    return ModifierHeld(g_settings.keepAspectVk);
+}
+
+// Whether the magnet applies right now. The extra key can turn it on while it
+// is held, or turn it off while it is held, or not exist at all.
+bool SnapAllowedWith(bool modifierDown) {
+    if (g_settings.snap == SnapMode::Off) {
+        return false;
+    }
+    if (g_settings.snapModifierVk == 0) {
+        return true;
+    }
+    return g_settings.snapModifierHold ? modifierDown : !modifierDown;
+}
+
+bool SnapAllowed() {
+    return SnapAllowedWith(ModifierHeld(g_settings.snapModifierVk));
 }
 
 void AdjustMove(HWND hwnd, const SnapState& state, RECT* rc) {
+    if (!SnapAllowed()) {
+        return;  // nothing to add to the loop's own rectangle
+    }
     // The loop's own proposal is thrown away: it works the position out from
     // the rectangle it last applied, so anything changed here would be built
     // on from then on and the window would never come off the line again.
@@ -294,24 +334,25 @@ void AdjustMove(HWND hwnd, const SnapState& state, RECT* rc) {
     window.bottom = window.top + height;
 
     RECT frame = WindowToFrame(window, state.inset);
-    if (g_settings.snap != SnapMode::Off) {
-        SnapMovedFrame(state, SnapDistancePx(hwnd), &frame);
-    }
+    SnapMovedFrame(state, SnapDistancePx(hwnd), &frame);
     *rc = FrameToWindow(frame, state.inset);
 }
 
 void AdjustSize(HWND hwnd, const SnapState& state, UINT edge, RECT* rc) {
-    if (KeepAspectHeld()) {
+    bool keepAspect = KeepAspectHeld();
+    if (!keepAspect && !SnapAllowed()) {
+        return;
+    }
+    // Both work on the visible frame: the shape the user sees is the one
+    // between the borders, not the one the window rectangle describes.
+    RECT frame = WindowToFrame(*rc, state.inset);
+    if (keepAspect) {
         // The ratio and the magnet want different rectangles, and the one the
         // user is holding a key down for wins.
-        ApplyAspectRatio(edge, state.startFrame, rc);
-        return;
+        ApplyAspectRatio(edge, state.startFrame, &frame);
+    } else {
+        SnapSizedFrame(state, edge, SnapDistancePx(hwnd), &frame);
     }
-    if (g_settings.snap == SnapMode::Off) {
-        return;
-    }
-    RECT frame = WindowToFrame(*rc, state.inset);
-    SnapSizedFrame(state, edge, SnapDistancePx(hwnd), &frame);
     *rc = FrameToWindow(frame, state.inset);
 }
 

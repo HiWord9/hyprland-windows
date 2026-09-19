@@ -32,10 +32,10 @@ Window handling the way Hyprland does it, on Windows.
 Moving and resizing feel like the real thing: windows still snap to the screen
 edges, dragging one to the top still offers the Windows 11 snap layouts, and
 `Esc` cancels a drag in progress. A window you are dragging fades to slightly
-translucent while you hold it, the way a Hyprland window does, and its edges
-are magnetic: bring one close to another window or to the edge of the screen
-and it lines up with it. Hold `Shift` while resizing to keep the window's
-proportions.
+translucent while you hold it, the way a Hyprland window does. Hold `Ctrl` as
+well and its edges turn magnetic: bring one close to another window or to the
+edge of the screen and it lines up with it. Hold `Shift` while resizing to
+keep the window's proportions.
 
 Give the windows with a hidden title bar a border color - your own, or
 `accent` to follow the Windows accent color - and it fades from one color to
@@ -118,6 +118,21 @@ bar.
   $description: >-
     How much room to leave when a window sticks to the edge of the screen,
     in pixels
+- snapModifier: ctrl
+  $name: Extra key for the magnet
+  $description: >-
+    A key held along with the move/resize modifier, so that edges are only
+    magnetic when you want them to be. "none" makes them always magnetic.
+  $options:
+  - ctrl: Ctrl
+  - shift: Shift
+  - alt: Alt
+  - none: No extra key
+- snapModifierWhen: hold
+  $name: What that key does
+  $options:
+  - hold: The edges are magnetic only while it is held
+  - suppress: The edges are magnetic unless it is held
 - keepAspectModifier: shift
   $name: Keep the shape while resizing
   $description: >-

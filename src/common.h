@@ -132,7 +132,9 @@ struct Settings {
     std::atomic<int> snapDistance{kDefaultSnapDistance};
     std::atomic<int> snapWindowGap{0};
     std::atomic<int> snapMonitorGap{0};
-    std::atomic<UINT> keepAspectVk{VK_SHIFT};  // 0: never keep the ratio
+    std::atomic<UINT> keepAspectVk{VK_SHIFT};   // 0: never keep the ratio
+    std::atomic<UINT> snapModifierVk{VK_CONTROL};  // 0: no extra key at all
+    std::atomic<bool> snapModifierHold{true};   // false: it suppresses instead
 };
 
 extern Settings g_settings;
@@ -149,6 +151,7 @@ MenuBarMode ParseMenuBarMode(PCWSTR raw);
 int ParseCorners(PCWSTR raw);
 DragTranslucency ParseDragTranslucency(PCWSTR raw);
 SnapMode ParseSnapMode(PCWSTR raw);
+bool ParseSnapModifierHold(PCWSTR raw);
 // A single modifier key, as a virtual key; 0 when the setting turns it off.
 UINT ParseModifierVk(PCWSTR raw, UINT whenEmpty);
 WindowAction ParseWindowAction(PCWSTR raw, WindowAction whenEmpty);
@@ -310,6 +313,8 @@ void RequestWindowAction(HWND root, WindowAction action);
 // Magnetic edges, and the aspect ratio while resizing
 
 RECT VisibleFrameOf(HWND hwnd);
+bool SnapAllowedWith(bool modifierDown);
+bool SnapAllowed();
 void BeginDragSnap(HWND root, WPARAM kind, POINT pt);
 void EndDragSnap(HWND hwnd);
 bool IsDragSnapping(HWND hwnd);

@@ -1129,6 +1129,8 @@ static void TestMoveResize() {
     // someone happens to have open can take the pull instead.
     g_settings.snap = SnapMode::Monitor;
     g_settings.snapMonitorGap = 0;
+    UINT savedSnapModifier = g_settings.snapModifierVk;
+    g_settings.snapModifierVk = 0;  // no key to hold: this is about the magnet
     MONITORINFO mi{sizeof(mi)};
     GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi);
     RECT winBefore;
@@ -1148,6 +1150,7 @@ static void TestMoveResize() {
           frameAfter.left, mi.rcWork.left);
     CHECK(!IsDragSnapping(hwnd), "and the subclass comes off with the drag");
     g_settings.snap = SnapMode::Off;
+    g_settings.snapModifierVk = savedSnapModifier;
 
     // The double-click gesture through the real message path, seen the way an
     // application sees it. With Alt as the modifier: holding Win here would
@@ -1422,8 +1425,10 @@ static void TestSnapGeometry() {
     RECT start{0, 0, 400, 200};  // two to one
     RECT corner{0, 0, 600, 260};
     ApplyAspectRatio(WMSZ_BOTTOMRIGHT, start, &corner);
-    CHECK(corner.right == 600 && corner.bottom == 300,
-          "a corner keeps the shape, widest axis first (%ldx%ld)",
+    // The nearest size on the shape's own line to the 600x260 asked for,
+    // rather than the one axis or the other taken whole.
+    CHECK(corner.right == 584 && corner.bottom == 292,
+          "a corner takes the nearest size that keeps the shape (%ldx%ld)",
           corner.right - corner.left, corner.bottom - corner.top);
     CHECK(corner.left == 0 && corner.top == 0,
           "with the corner that is not being held left where it was");
@@ -1439,6 +1444,59 @@ static void TestSnapGeometry() {
     CHECK(tall.right == 800 && tall.top == 0,
           "and so does the top, from the bottom edge (%ldx%ld)",
           tall.right - tall.left, tall.bottom - tall.top);
+
+    // The size has to move smoothly as the cursor does. Deciding it by
+    // whichever axis moved further reads the same most of the time and jumps
+    // wherever the two swap places, which is a diagonal line right through
+    // the middle of where a corner drag goes.
+    int worstJump = 0;
+    double worstShape = 2.0;
+    RECT previous{};
+    for (int step = 0; step <= 40; step++) {
+        // A path that crosses that diagonal: mostly downward at first, then
+        // mostly rightward.
+        RECT proposed{0, 0, 400 + step * 5, 200 + (40 - step) * 5};
+        ApplyAspectRatio(WMSZ_BOTTOMRIGHT, start, &proposed);
+        double shape = (double)(proposed.right - proposed.left) /
+                       (proposed.bottom - proposed.top);
+        if (abs(shape - 2.0) > abs(worstShape - 2.0)) {
+            worstShape = shape;
+        }
+        if (step > 0) {
+            worstJump = std::max(
+                worstJump, (int)abs((proposed.right - proposed.left) -
+                                    (previous.right - previous.left)));
+        }
+        previous = proposed;
+    }
+    CHECK(worstShape > 1.98 && worstShape < 2.02,
+          "the shape is kept at every step of a corner drag (%.3f)",
+          worstShape);
+    CHECK(worstJump <= 12,
+          "and the size follows the cursor without jumping (worst %d px)",
+          worstJump);
+
+    // The extra key that decides whether the magnet applies at all.
+    UINT savedSnapVk = g_settings.snapModifierVk;
+    bool savedHold = g_settings.snapModifierHold;
+    CHECK(ParseSnapModifierHold(L""), "the extra key holds by default");
+    CHECK(ParseSnapModifierHold(L"hold"), "extra key hold");
+    CHECK(!ParseSnapModifierHold(L"suppress"), "extra key suppress");
+    g_settings.snap = SnapMode::Both;
+    g_settings.snapModifierVk = VK_CONTROL;
+    g_settings.snapModifierHold = true;
+    CHECK(SnapAllowedWith(true) && !SnapAllowedWith(false),
+          "the magnet waits for the extra key when it is set to hold");
+    g_settings.snapModifierHold = false;
+    CHECK(!SnapAllowedWith(true) && SnapAllowedWith(false),
+          "and the key turns it off instead when it is set to suppress");
+    g_settings.snapModifierVk = 0;
+    CHECK(SnapAllowedWith(false) && SnapAllowedWith(true),
+          "with no extra key it is always on");
+    g_settings.snap = SnapMode::Off;
+    CHECK(!SnapAllowedWith(true), "unless it is switched off altogether");
+    g_settings.snapModifierVk = savedSnapVk;
+    g_settings.snapModifierHold = savedHold;
 
     g_settings.snap = savedMode;
     g_settings.snapWindowGap = savedWindowGap;

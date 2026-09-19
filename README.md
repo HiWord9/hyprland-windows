@@ -19,10 +19,10 @@ a mod for [Windhawk](https://windhawk.net/).
 Moving and resizing feel like the real thing: windows still snap to the screen
 edges, dragging one to the top still offers the Windows 11 snap layouts, and
 `Esc` cancels a drag in progress. A window you are dragging fades to slightly
-translucent while you hold it, the way a Hyprland window does, and its edges
-are magnetic: bring one close to another window or to the edge of the screen
-and it lines up with it. Hold `Shift` while resizing to keep the window's
-proportions.
+translucent while you hold it, the way a Hyprland window does. Hold `Ctrl` as
+well and its edges turn magnetic: bring one close to another window or to the
+edge of the screen and it lines up with it. Hold `Shift` while resizing to
+keep the window's proportions.
 
 The hotkey, the modifier key, the translucency and how much of the frame goes
 away with the title bar are all configurable in the mod's settings in Windhawk.
