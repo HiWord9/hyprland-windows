@@ -35,7 +35,14 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
         bool keyUp = wParam == WM_KEYUP || wParam == WM_SYSKEYUP;
         bool isWin = info->vkCode == VK_LWIN || info->vkCode == VK_RWIN;
         bool ours = info->dwExtraInfo == kInjectedMarker;
-        if (keyUp && isWin && !ours) {
+        if (keyUp && isWin && ours) {
+            // Another mask - armed in some other process for the same press -
+            // got to this release first. Standing down with it, rather than
+            // staying armed, keeps this one from eating the next Win tap,
+            // which the user meant for the Start menu.
+            g_winMaskArmed = false;
+            RemoveAllMaskHooks();
+        } else if (keyUp && isWin && !ours) {
             g_winMaskArmed = false;
 
             INPUT input[3]{};
@@ -84,6 +91,28 @@ void ArmWinMask(bool usingWin) {
         }
     }
     g_winMaskArmed = true;
+}
+
+// The mask has to be alive when the Win key comes up, which is after the
+// gesture is over. For a drag or a maximize the window's thread still is; a
+// window being closed takes its thread with it - and, as an application's
+// last window, the whole process - so a mask armed there is gone before the
+// key is let go of, and the Start menu opens. That one is armed in the shell
+// instead: the taskbar's thread is always there, it always pumps, and the mod
+// is loaded in it like everywhere else.
+bool ArmWinMaskInShell() {
+    HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr);
+    return tray && PostMessageW(tray, g_msgDrag, kDragArmMask, 0);
+}
+
+void ArmWinMaskFor(WindowAction action, bool usingWin) {
+    if (!usingWin) {
+        return;
+    }
+    if (action == WindowAction::Close && ArmWinMaskInShell()) {
+        return;
+    }
+    ArmWinMask(true);
 }
 
 // Tear the suppression down. A drag may have armed a hook that never saw its

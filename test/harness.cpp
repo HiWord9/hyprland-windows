@@ -1342,6 +1342,53 @@ static void TestBorderFade() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// The Start menu mask, and where it lives
+//
+// Without touching the real taskbar: a mask armed in the user's shell stays
+// armed until the next time the Win key comes up, and would eat that one.
+
+static void TestWinMask() {
+    printf("\n== Start menu mask ==\n");
+
+    ShutdownWinMask();
+    ArmWinMaskFor(WindowAction::ToggleMaximize, false);
+    CHECK(!g_winMaskArmed, "a gesture without Win arms nothing");
+    ArmWinMaskFor(WindowAction::ToggleMaximize, true);
+    CHECK(g_winMaskArmed,
+          "one whose window stays around arms the mask on its own thread");
+    ShutdownWinMask();
+
+    // The shell side: the request a closing window sends to the taskbar,
+    // answered on whichever thread retrieves it - this one here.
+    HWND stand = CreateTestWindow(L"Hypr mask test", false, 240, 240);
+    PostMessageW(stand, g_msgDrag, kDragArmMask, 0);
+    Pump(200);
+    CHECK(g_winMaskArmed, "the taskbar's request arms it where it lands");
+    {
+        std::lock_guard<std::mutex> lock(g_maskHooksMutex);
+        CHECK(g_maskHooks.count(GetCurrentThreadId()) == 1,
+              "with its hook on that thread");
+    }
+
+    // Another mask got to the release first, which is what a Win key-up that
+    // is our own looks like: stand down with it.
+    KBDLLHOOKSTRUCT ours{};
+    ours.vkCode = VK_LWIN;
+    ours.dwExtraInfo = kInjectedMarker;
+    LRESULT passed = LowLevelKeyboardProc(HC_ACTION, WM_KEYUP, (LPARAM)&ours);
+    CHECK(passed == 0 && !g_winMaskArmed,
+          "a release another mask made stands this one down");
+    {
+        std::lock_guard<std::mutex> lock(g_maskHooksMutex);
+        CHECK(g_maskHooks.empty(), "and takes its hook out");
+    }
+
+    ShutdownWinMask();
+    DestroyWindow(stand);
+    Pump(100);
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Which windows the border colors reach
 
 static void TestBorderScope() {
@@ -1960,6 +2007,7 @@ int main(int argc, char** argv) {
     TestAutoHide();
     TestBorderFade();
     TestBorderScope();
+    TestWinMask();
     TestSnapGeometry();
     TestGestures();
     TestResizeRelease();

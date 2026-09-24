@@ -158,7 +158,7 @@ bool HandleShortcutButton(const MSG* msg) {
     }
 
     Wh_Log(L"Shortcut on %p", root);
-    ArmWinMask(binding.win);
+    ArmWinMaskFor(action, binding.win);
     g_swallowShortcutButton = vk;
     RequestWindowAction(root, action);
     return true;

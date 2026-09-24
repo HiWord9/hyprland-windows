@@ -258,6 +258,10 @@ constexpr WORD kMaskVk = 0xE8;  // unassigned VK, only used as "a key was hit"
 constexpr ULONG_PTR kInjectedMarker = 0x48797072;  // 'Hypr'
 
 void ArmWinMask(bool usingWin);
+bool ArmWinMaskInShell();
+// The mask for a gesture that ends in this action: armed on this thread, or
+// in the shell when the action is going to take this thread away.
+void ArmWinMaskFor(WindowAction action, bool usingWin);
 void ShutdownWinMask();
 
 // A drag is requested with this message, posted to the window that is to be
@@ -276,6 +280,9 @@ enum DragKind : WPARAM {
     // Sent, not posted, and answered by the drag subclass rather than by the
     // message hook: the teardown taking that subclass off - see snap.cpp.
     kDragUnsnap = 4,
+    // Posted to the taskbar: arm the Start menu mask on its thread, for a
+    // gesture whose own window is about to go away - see startmenu.cpp.
+    kDragArmMask = 5,
 };
 
 // How long the thread that ends a resize waits for its loop to start. The
