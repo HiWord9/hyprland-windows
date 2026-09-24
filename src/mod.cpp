@@ -35,6 +35,9 @@ BOOL Wh_ModInit() {
 
 void Wh_ModAfterInit() {
     InstallMessageHooks();
+    // In the shell, the thread that keeps the Start menu shut after a Win +
+    // mouse gesture - up from the start, so it is there to be found.
+    StartShellMaskServer();
     RefreshBorderColors();
     if (g_settings.hideByDefault) {
         AutoHideExistingWindows();

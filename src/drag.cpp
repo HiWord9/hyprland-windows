@@ -250,13 +250,6 @@ bool HandleDragRequest(MSG* msg) {
         return false;  // ours, and there is nothing to dispatch
     }
 
-    if (msg->wParam == kDragArmMask) {
-        // On the taskbar's thread, and before the frame-window check below:
-        // the taskbar is not a window the mod moves, and does not need to be.
-        ArmWinMask(true);
-        return false;
-    }
-
     if (msg->wParam == kDragAction) {
         if (!g_uninitializing && IsFrameWindow(root)) {
             DoWindowAction(root, (WindowAction)msg->lParam);
@@ -314,7 +307,7 @@ bool HandleModifierButtonDown(const MSG* msg, bool right) {
     if (!right && action != WindowAction::None &&
         IsDoubleClickAt(root, msg->pt, GetTickCount())) {
         Wh_Log(L"Double click on %p", root);
-        ArmWinMaskFor(action, g_settings.dragModifier == DragModifier::Win);
+        ArmWinMask(g_settings.dragModifier == DragModifier::Win);
         g_swallowButtonUp[0] = true;  // we took the press, so its release too
         RequestWindowAction(root, action);
         return true;

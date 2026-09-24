@@ -1344,48 +1344,61 @@ static void TestBorderFade() {
 ////////////////////////////////////////////////////////////////////////////////
 // The Start menu mask, and where it lives
 //
-// Without touching the real taskbar: a mask armed in the user's shell stays
-// armed until the next time the Win key comes up, and would eat that one.
+// The parts that need no Win key held. What happens at a real release - with
+// the thread that armed it busy, or its process gone - is in
+// test/mask_busy_probe.cpp, which pops the Start menu when it fails.
 
 static void TestWinMask() {
     printf("\n== Start menu mask ==\n");
 
     ShutdownWinMask();
-    ArmWinMaskFor(WindowAction::ToggleMaximize, false);
+    Sleep(100);
+    CHECK(!IsShellProcess(), "the harness is not the shell");
+
+    ArmWinMask(false);
     CHECK(!g_winMaskArmed, "a gesture without Win arms nothing");
-    ArmWinMaskFor(WindowAction::ToggleMaximize, true);
-    CHECK(g_winMaskArmed,
-          "one whose window stays around arms the mask on its own thread");
-    ShutdownWinMask();
+    ArmWinMask(true);
+    Sleep(100);
+    CHECK(!g_winMaskArmed,
+          "and one whose Win press is already over arms nothing either");
 
-    // The shell side: the request a closing window sends to the taskbar,
-    // answered on whichever thread retrieves it - this one here.
-    HWND stand = CreateTestWindow(L"Hypr mask test", false, 240, 240);
-    PostMessageW(stand, g_msgDrag, kDragArmMask, 0);
-    Pump(200);
-    CHECK(g_winMaskArmed, "the taskbar's request arms it where it lands");
-    {
-        std::lock_guard<std::mutex> lock(g_maskHooksMutex);
-        CHECK(g_maskHooks.count(GetCurrentThreadId()) == 1,
-              "with its hook on that thread");
+    // The server: a thread of its own with a window any process can find.
+    HWND server = StartMaskServer();
+    CHECK(server != nullptr, "the mask server starts");
+    DWORD pid = 0;
+    DWORD serverThread = GetWindowThreadProcessId(server, &pid);
+    CHECK(pid == GetCurrentProcessId() &&
+              serverThread != GetCurrentThreadId(),
+          "on a thread of its own, not the one that asked for it");
+    CHECK(StartMaskServer() == server, "and there is only ever one of them");
+    bool findable = false;
+    for (HWND found = nullptr; (found = FindWindowExW(
+                                    HWND_MESSAGE, found, kMaskServerClass,
+                                    nullptr));) {
+        findable = findable || found == server;
     }
+    CHECK(findable, "which another process can find by its class");
 
-    // Another mask got to the release first, which is what a Win key-up that
-    // is our own looks like: stand down with it.
+    // Another mask got to the release first, which is what a Win key-up of
+    // our own looks like: stand down with it.
+    g_winMaskArmed = true;
     KBDLLHOOKSTRUCT ours{};
     ours.vkCode = VK_LWIN;
     ours.dwExtraInfo = kInjectedMarker;
     LRESULT passed = LowLevelKeyboardProc(HC_ACTION, WM_KEYUP, (LPARAM)&ours);
     CHECK(passed == 0 && !g_winMaskArmed,
           "a release another mask made stands this one down");
-    {
-        std::lock_guard<std::mutex> lock(g_maskHooksMutex);
-        CHECK(g_maskHooks.empty(), "and takes its hook out");
-    }
 
     ShutdownWinMask();
-    DestroyWindow(stand);
-    Pump(100);
+    for (int i = 0; i < 40 && IsWindow(server); i++) {
+        Sleep(25);
+    }
+    CHECK(!IsWindow(server), "and the teardown takes the server away");
+    {
+        std::lock_guard<std::mutex> lock(g_maskMutex);
+        CHECK(g_maskServer == nullptr && g_maskThreadId == 0,
+              "leaving nothing behind for the next one to trip over");
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
