@@ -1409,7 +1409,93 @@ static void TestWinMask() {
         std::lock_guard<std::mutex> lock(g_maskMutex);
         CHECK(g_maskServer == nullptr && g_maskThreadId == 0,
               "leaving nothing behind for the next one to trip over");
+        CHECK(g_maskHook == nullptr && g_foregroundHook == nullptr,
+              "neither a keyboard hook nor a foreground subscription");
     }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Key bindings seen by the keyboard hook, ahead of Windows' own shortcuts
+
+static std::wstring ForegroundProgram() {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(GetForegroundWindow(), &pid);
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    WCHAR path[MAX_PATH] = L"?";
+    DWORD len = MAX_PATH;
+    if (h) {
+        QueryFullProcessImageNameW(h, 0, path, &len);
+        CloseHandle(h);
+    }
+    std::wstring s = path;
+    return s.substr(s.find_last_of(L'\\') + 1);
+}
+
+static LRESULT KeyThroughHook(UINT vk, bool down) {
+    KBDLLHOOKSTRUCT info{};
+    info.vkCode = vk;
+    return LowLevelKeyboardProc(HC_ACTION, down ? WM_KEYDOWN : WM_KEYUP,
+                                (LPARAM)&info);
+}
+
+static void SendKey(WORD vk, bool up) {
+    INPUT in{};
+    in.type = INPUT_KEYBOARD;
+    in.ki.wVk = vk;
+    in.ki.dwFlags = up ? KEYEVENTF_KEYUP : 0;
+    SendInput(1, &in, sizeof(in));
+}
+
+static void TestKeyBindings(bool noInput) {
+    printf("\n== key bindings through the keyboard hook ==\n");
+
+    Hotkey savedShortcut = g_settings.windowShortcut;
+    WindowAction savedAction = g_settings.windowShortcutAction;
+    g_settings.windowShortcut = Hotkey{'W', false, false, false, true};
+    g_settings.windowShortcutAction = WindowAction::ToggleMaximize;
+
+    HWND hwnd = CreateTestWindow(L"Hypr key binding test", false, 280, 220);
+    SetForegroundWindow(hwnd);
+    Pump(300);
+
+    CHECK(KeyThroughHook('W', true) == 0 && KeyThroughHook('W', false) == 0,
+          "a plain W goes through untouched");
+
+    if (!noInput) {
+        // Win held for real, the way the hook sees it held.
+        SendKey(VK_LWIN, false);
+        Sleep(50);
+        CHECK(KeyThroughHook('W', true) == 1, "Win+W is taken");
+        CHECK(KeyThroughHook('W', true) == 1, "and so is its auto-repeat");
+        CHECK(KeyThroughHook('W', false) == 1, "and its release");
+        CHECK(KeyThroughHook('W', false) == 0, "but only that one release");
+        SendKey(VK_LWIN, true);
+        Pump(800);
+        CHECK(IsZoomed(hwnd), "and the window in front did what it is bound to");
+        std::wstring fg = ForegroundProgram();
+        CHECK(_wcsicmp(fg.c_str(), L"StartMenuExperienceHost.exe") != 0 &&
+                  _wcsicmp(fg.c_str(), L"SearchHost.exe") != 0,
+              "with Start left shut after Win came up (%ls in front)",
+              fg.c_str());
+        ShowWindow(hwnd, SW_RESTORE);
+        Pump(200);
+    }
+
+    // An elevated process keeps its hook while a window of its own is in
+    // front, and only then.
+    SetForegroundWindow(hwnd);
+    Pump(200);
+    FollowForeground(hwnd);
+    CHECK(g_keepKeyHook && g_maskHook != nullptr,
+          "a window of this process in front: the hook is in place");
+    FollowForeground(FindWindowW(L"Shell_TrayWnd", nullptr));
+    CHECK(!g_keepKeyHook && g_maskHook == nullptr,
+          "someone else's window in front: it is gone again");
+
+    g_settings.windowShortcut = savedShortcut;
+    g_settings.windowShortcutAction = savedAction;
+    DestroyWindow(hwnd);
+    Pump(100);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2032,6 +2118,7 @@ int main(int argc, char** argv) {
     TestBorderFade();
     TestBorderScope();
     TestWinMask();
+    TestKeyBindings(noInput);
     TestSnapGeometry();
     TestGestures();
     TestResizeRelease();

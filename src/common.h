@@ -260,8 +260,13 @@ constexpr WORD kMaskVk = 0xE8;  // unassigned VK, only used as "a key was hit"
 constexpr ULONG_PTR kInjectedMarker = 0x48797072;  // 'Hypr'
 
 void ArmWinMask(bool usingWin);
-void StartShellMaskServer();
+void MaskModifierTap();
+bool IsShellProcess();
+bool IsElevatedProcess();
+void StartKeyboardServer();
+void StartKeyboardServerForWindow();
 void ShutdownWinMask();
+bool HandleBindingKey(UINT vk, bool down);
 
 // A drag is requested with this message, posted to the window that is to be
 // moved or resized - see the comment at the top of drag.cpp.
@@ -312,7 +317,7 @@ bool HandleLeftButtonUp();
 // the modifiers are held.
 bool IsMouseButtonVk(UINT vk);
 UINT ButtonVkForMessage(UINT message, WPARAM wParam);
-bool MatchesShortcut(const Hotkey& binding, UINT vk);
+bool MatchesShortcut(const Hotkey& binding, UINT vk, bool now = false);
 bool HandleShortcutButton(const MSG* msg);
 bool HandleShortcutButtonUp(const MSG* msg);
 

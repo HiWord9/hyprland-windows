@@ -243,6 +243,9 @@ void OnWindowCreated(HWND hwnd, DWORD dwStyle) {
     // A thread that creates a window is a thread that will pump messages, so
     // this is where threads born after the mod loaded get their hook.
     InstallMessageHookForThread();
+    if (!(dwStyle & WS_CHILD)) {
+        StartKeyboardServerForWindow();
+    }
 
     if ((dwStyle & WS_CHILD) || !g_settings.hideByDefault) {
         return;

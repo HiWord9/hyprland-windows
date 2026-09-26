@@ -12,7 +12,7 @@ a mod for [Windhawk](https://windhawk.net/).
   window; the settings offer other things for it to do.
 * **Win + middle click** — close the window under the cursor. The button, the
   modifiers and the action are all settings; it can be a key instead, such as
-  Win+Q.
+  Win+Q — even one Windows already uses, like Win+W.
 * **Ctrl+Alt+H** — hide the focused window's title bar; press it again to bring
   the title bar back.
 

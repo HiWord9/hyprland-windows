@@ -64,7 +64,8 @@ bar.
   $description: >-
     Hides or restores the title bar of the focused window. Combine Ctrl, Alt,
     Shift and Win with "+", for example Ctrl+Alt+H or Win+Shift+T. Set it to
-    "none" to turn the hotkey off.
+    "none" to turn the hotkey off. It takes precedence over a Windows shortcut
+    on the same keys.
 - dragModifier: win
   $name: Move/resize modifier key
   $description: >-
@@ -166,9 +167,11 @@ bar.
     A key or a mouse button that acts on a window: with a mouse button it is
     the window under the cursor, with a key the focused one. Combine Ctrl,
     Alt, Shift and Win with "+", and use MButton, XButton1 or XButton2 for
-    the mouse - for example Win+MButton, Alt+XButton1 or Win+Q. Set it to
-    "none" to turn it off. Left and right are taken by move and resize, and
-    binding one of them here takes it away from the drag.
+    the mouse - for example Win+MButton, Alt+XButton1 or Win+Q. A key takes
+    precedence over a Windows shortcut on the same keys, so Win+W can close
+    windows instead of opening the widgets. Set it to "none" to turn it off.
+    Left and right are taken by move and resize, and binding one of them here
+    takes it away from the drag.
 - windowShortcutAction: close
   $name: What the window shortcut does
   $options:

@@ -32,3 +32,62 @@ bool HandleHotkey(const MSG* msg) {
     }
     return false;
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// The same bindings, before Windows sees them
+//
+// Windows takes the keys of its own shortcuts - Win+W, Win+E... - before any
+// window gets them, so a binding on one of those never reaches HandleHotkey.
+// The keyboard hook of the mask server (startmenu.cpp) sees every key first
+// and hands it here. A key it takes never reaches a window, so nothing is done
+// twice, and HandleHotkey keeps working where there is no such hook.
+
+// The key whose press was taken, so that its repeats and its release are
+// taken too. Only touched on the server thread.
+UINT g_takenKey;
+
+// Returns true if the key is to be swallowed.
+bool HandleBindingKey(UINT vk, bool down) {
+    if (!down) {
+        if (vk != g_takenKey) {
+            return false;
+        }
+        g_takenKey = 0;
+        return true;
+    }
+    if (vk == g_takenKey) {
+        return true;  // auto-repeat of a key that was taken
+    }
+
+    Hotkey titleBar = g_settings.hotkey;
+    Hotkey shortcut = g_settings.windowShortcut;
+    WindowAction action = g_settings.windowShortcutAction;
+    bool toggle = MatchesShortcut(titleBar, vk, true);
+    bool act = !toggle && action != WindowAction::None &&
+               !IsMouseButtonVk(shortcut.vk) &&
+               MatchesShortcut(shortcut, vk, true);
+    if (!toggle && !act) {
+        return false;
+    }
+    HWND target = GetAncestor(GetForegroundWindow(), GA_ROOT);
+    if (act && !IsFrameWindow(target)) {
+        return false;  // the desktop, the taskbar... - Windows' own shortcut
+    }
+
+    g_takenKey = vk;
+    // Win or Alt would otherwise count as tapped on their own when they come
+    // up, the key between them having been taken: Start would open, or the
+    // window's menu.
+    Hotkey used = toggle ? titleBar : shortcut;
+    if (used.win || used.alt) {
+        MaskModifierTap();
+    }
+    if (toggle) {
+        Wh_Log(L"Hotkey: toggling %p (keyboard hook)", target);
+        RequestFrameless(target, kActionToggle);
+    } else {
+        Wh_Log(L"Shortcut key on %p (keyboard hook)", target);
+        RequestWindowAction(target, action);
+    }
+    return true;
+}

@@ -30,6 +30,14 @@
 // or there is no shell - the process starts a thread of its own for it. And
 // the thread watches the Win key itself: a mask whose press is over comes
 // down, whether or not the release ever reached the hook.
+//
+// The same hook also sees the key bindings before Windows does, so that one
+// can take over a shortcut of Windows' own, such as Win+W (hotkey.cpp). For
+// that it stays in place for good in the shell. Keys typed into an elevated
+// window don't reach it there - Windows keeps them from the hooks of the
+// processes below - so an elevated process with windows runs a server of its
+// own as well, whose hook is in place while one of its windows is in front:
+// never more than one of those at a time.
 #include "common.h"
 
 std::atomic<bool> g_winMaskArmed{false};
@@ -47,6 +55,10 @@ DWORD g_maskThreadId;
 
 // Only ever touched on the server thread.
 HHOOK g_maskHook;
+// The hook stays even with no mask armed: in the shell, and in an elevated
+// process while one of its windows is in front.
+bool g_keepKeyHook;
+HWINEVENTHOOK g_foregroundHook;
 
 bool WinKeyDown() {
     return ((GetAsyncKeyState(VK_LWIN) | GetAsyncKeyState(VK_RWIN)) & 0x8000) !=
@@ -56,11 +68,17 @@ bool WinKeyDown() {
 LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
     ModRef ref;  // the image must not go away under this procedure
 
-    if (code == HC_ACTION && g_winMaskArmed && !g_uninitializing) {
-        auto* info = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
-        bool keyUp = wParam == WM_KEYUP || wParam == WM_SYSKEYUP;
+    if (code != HC_ACTION || g_uninitializing) {
+        return CallNextHookEx(nullptr, code, wParam, lParam);
+    }
+    auto* info = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
+    bool keyUp = wParam == WM_KEYUP || wParam == WM_SYSKEYUP;
+    bool ours = info->dwExtraInfo == kInjectedMarker;
+    if (!ours && HandleBindingKey(info->vkCode, !keyUp)) {
+        return 1;
+    }
+    if (g_winMaskArmed) {
         bool isWin = info->vkCode == VK_LWIN || info->vkCode == VK_RWIN;
-        bool ours = info->dwExtraInfo == kInjectedMarker;
         if (keyUp && isWin && ours) {
             // Another mask - armed in some other process for the same press -
             // got to this release first. Standing down with it, rather than
@@ -89,13 +107,28 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
 ////////////////////////////////////////////////////////////////////////////////
 // The server thread
 
-void DisarmOnServer(HWND hwnd) {
-    g_winMaskArmed = false;
-    KillTimer(hwnd, kMaskTimerId);
-    if (g_maskHook) {
+// In place while there is a mask armed or a reason to keep it, and not a
+// moment longer.
+void UpdateKeyHook() {
+    bool wanted = !g_uninitializing && (g_keepKeyHook || g_winMaskArmed);
+    if (wanted && !g_maskHook) {
+        // A low-level hook procedure is called in the thread that installed
+        // it, so no module handle is needed.
+        g_maskHook =
+            SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc, nullptr, 0);
+        if (!g_maskHook) {
+            Wh_Log(L"WH_KEYBOARD_LL hook failed (%u)", GetLastError());
+        }
+    } else if (!wanted && g_maskHook) {
         UnhookWindowsHookEx(g_maskHook);
         g_maskHook = nullptr;
     }
+}
+
+void DisarmOnServer(HWND hwnd) {
+    g_winMaskArmed = false;
+    KillTimer(hwnd, kMaskTimerId);
+    UpdateKeyHook();
 }
 
 void ArmOnServer(HWND hwnd) {
@@ -104,18 +137,39 @@ void ArmOnServer(HWND hwnd) {
         // left for the next one.
         return;
     }
-    if (!g_maskHook) {
-        // A low-level hook procedure is called in the thread that installed
-        // it, so no module handle is needed.
-        g_maskHook =
-            SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc, nullptr, 0);
-        if (!g_maskHook) {
-            Wh_Log(L"WH_KEYBOARD_LL hook failed (%u)", GetLastError());
-            return;
-        }
-    }
     g_winMaskArmed = true;
+    UpdateKeyHook();
+    if (!g_maskHook) {
+        g_winMaskArmed = false;
+        return;
+    }
     SetTimer(hwnd, kMaskTimerId, kMaskPollMs, nullptr);
+}
+
+// What the mask sends ahead of a release, sent by itself: for a key binding
+// the hook took, whose Win or Alt is then no lone tap.
+void MaskModifierTap() {
+    INPUT input[2]{};
+    input[0].type = INPUT_KEYBOARD;
+    input[0].ki.wVk = kMaskVk;
+    input[0].ki.dwExtraInfo = kInjectedMarker;
+    input[1] = input[0];
+    input[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(ARRAYSIZE(input), input, sizeof(INPUT));
+}
+
+// An elevated process keeps the hook while a window of its own is in front,
+// which is when the shell's hook is blind.
+void FollowForeground(HWND foreground) {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(foreground, &pid);
+    g_keepKeyHook = pid == GetCurrentProcessId();
+    UpdateKeyHook();
+}
+
+void CALLBACK OnForegroundChanged(HWINEVENTHOOK, DWORD, HWND hwnd, LONG, LONG,
+                                  DWORD, DWORD) {
+    FollowForeground(hwnd);
 }
 
 LRESULT CALLBACK MaskServerProc(HWND hwnd, UINT msg, WPARAM wParam,
@@ -171,11 +225,27 @@ DWORD WINAPI MaskServerThread(LPVOID param) {
     SetEvent(ready);
 
     if (hwnd) {
+        if (IsShellProcess()) {
+            g_keepKeyHook = true;
+            UpdateKeyHook();
+        } else if (IsElevatedProcess()) {
+            // Only the foreground changing, delivered to this thread's queue:
+            // Windows does not wait for it, and nothing else comes of it.
+            g_foregroundHook = SetWinEventHook(
+                EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr,
+                OnForegroundChanged, 0, 0, WINEVENT_OUTOFCONTEXT);
+            FollowForeground(GetForegroundWindow());
+        }
         MSG msg;
         while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
             DispatchMessageW(&msg);
         }
-        DisarmOnServer(hwnd);
+        if (g_foregroundHook) {
+            UnhookWinEvent(g_foregroundHook);
+            g_foregroundHook = nullptr;
+        }
+        g_keepKeyHook = false;
+        DisarmOnServer(hwnd);  // which takes the hook down with it
         DestroyWindow(hwnd);
     }
     // The class's procedure is in this image, so it has to go with it.
@@ -247,10 +317,34 @@ bool IsShellProcess() {
     return _wcsicmp(ThisProgramName().c_str(), L"explorer.exe") == 0;
 }
 
-// Called from Wh_ModAfterInit: the shell has its server up from the start,
-// so that it is there to be found before anybody needs it.
-void StartShellMaskServer() {
-    if (IsShellProcess()) {
+BOOL CALLBACK FindOwnWindowProc(HWND hwnd, LPARAM lParam) {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (pid == GetCurrentProcessId()) {
+        *reinterpret_cast<bool*>(lParam) = true;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+// Called from Wh_ModAfterInit: the shell has its server up from the start, so
+// that it is there to be found before anybody needs it, and its hook sees the
+// key bindings. So does an elevated process that has windows already.
+void StartKeyboardServer() {
+    bool hasWindows = false;
+    if (!IsShellProcess() && IsElevatedProcess()) {
+        EnumWindows(FindOwnWindowProc, (LPARAM)&hasWindows);
+    }
+    if (IsShellProcess() || hasWindows) {
+        StartMaskServer();
+    }
+}
+
+// Called for every top-level window a process creates: the one that gives an
+// elevated process a window to follow. Processes without one - services and
+// the like - never run a server at all.
+void StartKeyboardServerForWindow() {
+    if (IsElevatedProcess()) {
         StartMaskServer();
     }
 }

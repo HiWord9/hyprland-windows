@@ -112,17 +112,22 @@ UINT ButtonVkForMessage(UINT message, WPARAM wParam) {
     }
 }
 
-bool MatchesShortcut(const Hotkey& binding, UINT vk) {
+bool MatchesShortcut(const Hotkey& binding, UINT vk, bool now) {
     if (!binding.vk || binding.vk != vk) {
         return false;
     }
     // Ctrl, Alt and Shift as the thread saw them when it took the message,
-    // which is what a keyboard shortcut is about. The Win key is asked for
-    // globally instead: it belongs to the shell, and a thread's own copy of
-    // the keyboard state does not reliably hear about it.
-    bool ctrl = GetKeyState(VK_CONTROL) < 0;
-    bool alt = GetKeyState(VK_MENU) < 0;
-    bool shift = GetKeyState(VK_SHIFT) < 0;
+    // which is what a keyboard shortcut is about - or, for the keyboard hook,
+    // whose thread takes no keyboard input of its own, as they are now. The
+    // Win key is asked for globally either way: it belongs to the shell, and
+    // a thread's own copy of the keyboard state does not reliably hear about
+    // it.
+    auto held = [now](int vk) {
+        return now ? (GetAsyncKeyState(vk) & 0x8000) != 0 : GetKeyState(vk) < 0;
+    };
+    bool ctrl = held(VK_CONTROL);
+    bool alt = held(VK_MENU);
+    bool shift = held(VK_SHIFT);
     bool win =
         ((GetAsyncKeyState(VK_LWIN) | GetAsyncKeyState(VK_RWIN)) & 0x8000) != 0;
     return ctrl == binding.ctrl && alt == binding.alt &&
