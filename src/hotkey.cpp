@@ -69,11 +69,10 @@ bool HandleBindingKey(UINT vk, bool down) {
     if (!toggle && !act) {
         return false;
     }
+    // Taken even with nothing to act on - the desktop, the taskbar: a binding
+    // is the user's, and Windows' own shortcut on the same keys doesn't come
+    // back just because no window is in front.
     HWND target = GetAncestor(GetForegroundWindow(), GA_ROOT);
-    if (act && !IsFrameWindow(target)) {
-        return false;  // the desktop, the taskbar... - Windows' own shortcut
-    }
-
     g_takenKey = vk;
     // Win or Alt would otherwise count as tapped on their own when they come
     // up, the key between them having been taken: Start would open, or the
@@ -85,7 +84,7 @@ bool HandleBindingKey(UINT vk, bool down) {
     if (toggle) {
         Wh_Log(L"Hotkey: toggling %p (keyboard hook)", target);
         RequestFrameless(target, kActionToggle);
-    } else {
+    } else if (IsFrameWindow(target)) {
         Wh_Log(L"Shortcut key on %p (keyboard hook)", target);
         RequestWindowAction(target, action);
     }

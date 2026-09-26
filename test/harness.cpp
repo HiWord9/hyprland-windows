@@ -1523,6 +1523,28 @@ static void TestKeyBindings(bool noInput) {
               fg.c_str());
         ShowWindow(hwnd, SW_RESTORE);
         Pump(200);
+
+        // With no window of that kind in front - a frameless popup stands in
+        // for the desktop - the binding still keeps Windows' own shortcut
+        // away, and does nothing.
+        HWND popup = CreateWindowExW(
+            0, L"STATIC", L"Hypr popup", WS_POPUP | WS_VISIBLE, 100, 100, 120,
+            80, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        SetForegroundWindow(popup);
+        Pump(200);
+        CHECK(GetForegroundWindow() == popup && !IsFrameWindow(popup),
+              "a window with no frame is in front");
+        SendKey(VK_LWIN, false);
+        Sleep(50);
+        CHECK(KeyThroughHook('W', true) == 1 && KeyThroughHook('W', false) == 1,
+              "and Win+W is still taken");
+        SendKey(VK_LWIN, true);
+        Pump(400);
+        CHECK(IsWindow(popup) && !IsZoomed(hwnd),
+              "with nothing done to any window");
+        DestroyWindow(popup);
+        SetForegroundWindow(hwnd);
+        Pump(200);
     }
 
     // An elevated process keeps its hook while a window of its own is in
