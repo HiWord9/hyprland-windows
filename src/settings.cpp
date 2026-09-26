@@ -14,6 +14,43 @@ std::wstring NormalizeSettingString(PCWSTR raw) {
     return s;
 }
 
+// The file name of this process's executable, e.g. "explorer.exe".
+std::wstring ThisProgramName() {
+    WCHAR path[MAX_PATH];
+    DWORD len = GetModuleFileNameW(nullptr, path, MAX_PATH);
+    if (!len || len >= MAX_PATH) {
+        return L"";
+    }
+    PCWSTR slash = wcsrchr(path, L'\\');
+    return slash ? slash + 1 : path;
+}
+
+// Whether a program list entry names this program. Compared by file name and
+// case-insensitively, so a full path pasted into the setting works as well.
+bool ProgramEntryMatches(PCWSTR entry, const std::wstring& program) {
+    std::wstring name = NormalizeSettingString(entry);
+    size_t slash = name.find_last_of(L"\\/");
+    if (slash != std::wstring::npos) {
+        name = name.substr(slash + 1);
+    }
+    return !name.empty() && name == NormalizeSettingString(program.c_str());
+}
+
+bool ProgramInListSetting(PCWSTR name) {
+    std::wstring program = ThisProgramName();
+    for (int i = 0; i < 256; i++) {
+        WindhawkUtils::StringSetting entry(
+            Wh_GetStringSetting(L"%s[%d]", name, i));
+        if (!*entry.get()) {
+            break;  // the end of the list
+        }
+        if (ProgramEntryMatches(entry, program)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Turns the "key" setting into a virtual key code, 0 if unusable.
 UINT ParseKeyName(PCWSTR raw) {
     std::wstring s = NormalizeSettingString(raw);
@@ -284,7 +321,10 @@ void LoadSettings() {
 
     WindhawkUtils::StringSetting menuBar(Wh_GetStringSetting(L"menuBarWindows"));
     g_settings.menuBarMode = ParseMenuBarMode(menuBar);
-    g_settings.hideByDefault = Wh_GetIntSetting(L"hideByDefault") != 0;
+    // Decided once for the whole process: the mod runs inside the program,
+    // so a program on the list simply never hides anything by default.
+    g_settings.hideByDefault = Wh_GetIntSetting(L"hideByDefault") != 0 &&
+                               !ProgramInListSetting(L"hideByDefaultExclude");
 
     WindhawkUtils::StringSetting active(Wh_GetStringSetting(L"borderActive"));
     WindhawkUtils::StringSetting inactive(

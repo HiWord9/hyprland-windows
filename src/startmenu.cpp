@@ -244,13 +244,7 @@ HWND FindMaskServer() {
 }
 
 bool IsShellProcess() {
-    WCHAR path[MAX_PATH];
-    DWORD len = GetModuleFileNameW(nullptr, path, MAX_PATH);
-    if (!len || len >= MAX_PATH) {
-        return false;
-    }
-    PCWSTR name = wcsrchr(path, L'\\');
-    return name && _wcsicmp(name + 1, L"explorer.exe") == 0;
+    return _wcsicmp(ThisProgramName().c_str(), L"explorer.exe") == 0;
 }
 
 // Called from Wh_ModAfterInit: the shell has its server up from the start,

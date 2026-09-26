@@ -143,6 +143,8 @@ struct Settings {
 extern Settings g_settings;
 
 std::wstring NormalizeSettingString(PCWSTR raw);
+std::wstring ThisProgramName();
+bool ProgramEntryMatches(PCWSTR entry, const std::wstring& program);
 UINT ParseKeyName(PCWSTR raw);
 // An empty setting means the documented default, which is not the same one
 // for every binding - Windhawk hands out an empty string for a setting it has

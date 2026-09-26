@@ -195,6 +195,15 @@ bar.
   $description: >-
     Automatically hide the title bar of every new window. Use the hotkey to
     bring it back for a specific window.
+- hideByDefaultExclude:
+  - mspaint.exe
+  - SnippingTool.exe
+  $name: Keep the title bar in these programs
+  $description: >-
+    Programs "Hide title bars by default" leaves alone, by file name (for
+    example notepad.exe). The hotkey still hides their title bar. Paint and
+    the Snipping Tool are here because Win + mouse can't move them, so without
+    a title bar there is nothing left to grab them by.
 - borderActive: ""
   $name: Border color of the active window
   $description: >-

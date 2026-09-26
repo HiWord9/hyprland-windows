@@ -287,6 +287,17 @@ static bool RealModLoaded() {
 
 static void TestParsers() {
     printf("\n== parsers ==\n");
+    std::wstring paint = L"mspaint.exe";
+    CHECK(ProgramEntryMatches(L"mspaint.exe", paint), "program list: a name");
+    CHECK(ProgramEntryMatches(L" MSPaint.EXE ", paint),
+          "program list: case and spaces don't matter");
+    CHECK(ProgramEntryMatches(L"C:\\Program Files\\Paint\\mspaint.exe", paint),
+          "program list: a full path is taken by its file name");
+    CHECK(!ProgramEntryMatches(L"paint.exe", paint) &&
+              !ProgramEntryMatches(L"", paint),
+          "program list: a different or empty name is no match");
+    CHECK(!ThisProgramName().empty(), "this program has a name (%ls)",
+          ThisProgramName().c_str());
     CHECK(ParseKeyName(L"H") == 'H', "key 'H'");
     CHECK(ParseKeyName(L" h ") == 'H', "key ' h ' (trim + upper)");
     CHECK(ParseKeyName(L"7") == '7', "key '7'");
