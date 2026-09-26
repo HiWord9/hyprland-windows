@@ -931,6 +931,50 @@ static bool ResizeAndReleaseAtOnce(HWND hwnd, POINT start, DWORD holdMs) {
     return !rescued;
 }
 
+// Windows reuses the IDs of threads that have ended. File Explorer opens each
+// folder window on a thread of its own and ends it when the window closes, so
+// a new window's thread often has the ID of one the mod hooked before - and
+// that one's hooks went with it.
+static void TestReusedThreadId() {
+    printf("\n== a thread with a reused ID ==\n");
+
+    DWORD firstId = 0;
+    std::thread([&] {
+        firstId = GetCurrentThreadId();
+        InstallMessageHookForThread();
+    }).join();
+
+    bool reused = false, hooked = false;
+    for (int i = 0; i < 5000 && !reused; i++) {
+        std::thread([&] {
+            if (GetCurrentThreadId() != firstId) {
+                return;
+            }
+            reused = true;
+            InstallMessageHookForThread();
+            // The hook is what does the work: pumped without calling
+            // ProcessRetrievedMessage, the hotkey hides the title bar only
+            // if the hook is really there.
+            HWND hwnd =
+                CreateTestWindow(L"Hypr reused thread test", false, 200, 200);
+            PumpRaw(200);
+            PostMessageW(hwnd, WM_KEYDOWN, 'H', 1);
+            PumpRaw(400);
+            hooked = IsFrameless(hwnd);
+            RequestFrameless(hwnd, kActionShow);
+            PumpRaw(200);
+            DestroyWindow(hwnd);
+            PumpRaw(100);
+        }).join();
+    }
+    if (!reused) {
+        printf("  (no thread got the ID %lu again - nothing to check)\n",
+               firstId);
+        return;
+    }
+    CHECK(hooked, "a new thread with an old thread's ID gets a hook too");
+}
+
 static void TestMoveResize() {
     printf("\n== move / resize loops ==\n");
 
@@ -2114,6 +2158,7 @@ int main(int argc, char** argv) {
     TestFramelessGeometry(true, MenuBarMode::Hide);
     TestFramelessGeometry(true, MenuBarMode::KeepMenu);
     TestMessageHook();
+    TestReusedThreadId();
     TestAutoHide();
     TestBorderFade();
     TestBorderScope();

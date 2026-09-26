@@ -183,7 +183,25 @@ void InstallMessageHookForThread() {
     g_messageHookAttempted = true;
 
     std::lock_guard<std::mutex> lock(g_messageHooksMutex);
-    InstallMessageHookLocked(GetCurrentThreadId());
+    // Windows reuses the IDs of threads that have ended, and File Explorer
+    // ends the thread of every folder window that closes. An entry for this
+    // ID can be one such thread's, whose hooks went with it - and taking it
+    // for this thread's left the window with no hook at all. So whatever is
+    // there is taken off and the hooks are put in afresh: taking off a dead
+    // thread's hook does nothing, and one this thread was given when the mod
+    // was loaded comes straight back.
+    DWORD threadId = GetCurrentThreadId();
+    auto it = g_messageHooks.find(threadId);
+    if (it != g_messageHooks.end()) {
+        if (it->second.getMessage) {
+            UnhookWindowsHookEx(it->second.getMessage);
+        }
+        if (it->second.callWndProc) {
+            UnhookWindowsHookEx(it->second.callWndProc);
+        }
+        g_messageHooks.erase(it);
+    }
+    InstallMessageHookLocked(threadId);
 }
 
 // Covers the threads that already had windows when the mod was loaded; threads
