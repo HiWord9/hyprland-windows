@@ -24,8 +24,15 @@ well and its edges turn magnetic: bring one close to another window or to the
 edge of the screen and it lines up with it. Hold `Shift` while resizing to
 keep the window's proportions.
 
-The hotkey, the modifier key, the translucency and how much of the frame goes
-away with the title bar are all configurable in the mod's settings in Windhawk.
+Title bars can also go away on their own: with hiding by default turned on,
+every new window opens without one, except the programs on a list of
+exceptions (Paint and the Snipping Tool to begin with). Windows can get border
+colors of your choice as well — one for the focused window, one for the rest,
+or the Windows accent color — that fade into each other as the focus moves.
+
+The hotkey, the modifier key, the translucency, the magnet, the borders and how
+much of the frame goes away with the title bar are all configurable in the
+mod's settings in Windhawk.
 
 ## Installing
 
@@ -40,6 +47,9 @@ away with the title bar are all configurable in the mod's settings in Windhawk.
 
 * Apps that draw their own title bar instead of using the system one (Chrome,
   Electron apps, VS Code, Office) are not affected by the hotkey.
+* `Win` + mouse doesn't work over content drawn with WinUI or XAML — Paint,
+  Windows Terminal, the tabs and address bar of File Explorer: Windows hands
+  those clicks to the app past the point where the mod sees them.
 * A window with a classic menu bar (File, Edit, …) can't keep that menu where it
   is once the title bar is gone, so by default it is hidden along with it and
   stays reachable from the keyboard with `Alt` or `F10`. The settings offer the
