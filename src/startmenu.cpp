@@ -261,6 +261,23 @@ void StartShellMaskServer() {
     }
 }
 
+bool IsElevatedProcess() {
+    static const bool elevated = [] {
+        HANDLE token;
+        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
+            return false;
+        }
+        TOKEN_ELEVATION elevation{};
+        DWORD len = 0;
+        bool result = GetTokenInformation(token, TokenElevation, &elevation,
+                                          sizeof(elevation), &len) &&
+                      elevation.TokenIsElevated;
+        CloseHandle(token);
+        return result;
+    }();
+    return elevated;
+}
+
 // Called by whatever just consumed a Win + mouse gesture; `usingWin` is that
 // gesture's own answer to whether the Win key is part of it, because the
 // modifier is not the same setting for every one of them.
@@ -274,6 +291,18 @@ void ArmWinMask(bool usingWin) {
     }
     if (!server || !PostMessageW(server, kMaskArm, 0, 0)) {
         Wh_Log(L"No Start menu mask to arm (%u)", GetLastError());
+    }
+    // Windows keeps the keys typed into an elevated window - Task Manager,
+    // anything run as administrator - from the low-level hooks of the
+    // processes below it, the shell's included. Such a process arms a mask
+    // of its own as well, which sees them. The shell's stays armed too: if
+    // the gesture closed the process's last window, the release goes to
+    // whatever window comes forward next.
+    if (IsElevatedProcess()) {
+        HWND own = StartMaskServer();
+        if (own && own != server) {
+            PostMessageW(own, kMaskArm, 0, 0);
+        }
     }
 }
 
