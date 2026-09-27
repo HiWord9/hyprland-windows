@@ -303,7 +303,7 @@ void AnimateBorderColor(HWND hwnd, bool active) {
     COLORREF to = BorderColorFor(active);
     COLORREF from = CurrentBorderColor(hwnd);
     int durationMs = g_settings.borderFadeDuration;
-    if (g_uninitializing || !g_settings.borderFade || from == to ||
+    if (g_uninitializing || durationMs <= 0 || from == to ||
         !IsBlendableColor(from) || !IsBlendableColor(to)) {
         ApplyBorderColor(hwnd, active);  // nothing to fade between
         return;

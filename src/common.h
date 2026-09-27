@@ -125,7 +125,6 @@ struct Settings {
     std::atomic<bool> hideByDefault{false};
     std::atomic<COLORREF> borderActive{kColorUntouched};
     std::atomic<COLORREF> borderInactive{kColorUntouched};
-    std::atomic<bool> borderFade{true};
     // Off: the border colors apply to every window with a frame. On: only to
     // the ones the mod has taken the title bar from.
     std::atomic<bool> borderFramelessOnly{false};
@@ -151,7 +150,6 @@ UINT ParseKeyName(PCWSTR raw);
 // never written.
 Hotkey ParseHotkey(PCWSTR raw, PCWSTR whenEmpty = kDefaultHotkey);
 COLORREF ParseBorderColor(PCWSTR raw);
-bool ParseBorderTransition(PCWSTR raw);
 MenuBarMode ParseMenuBarMode(PCWSTR raw);
 int ParseCorners(PCWSTR raw);
 DragTranslucency ParseDragTranslucency(PCWSTR raw);

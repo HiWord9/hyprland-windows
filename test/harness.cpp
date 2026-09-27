@@ -367,10 +367,6 @@ static void TestParsers() {
     CHECK(ParseMenuBarMode(L"skip") == MenuBarMode::Skip, "menu mode skip");
     CHECK(ParseMenuBarMode(L"") == MenuBarMode::Hide, "menu mode default");
 
-    CHECK(ParseBorderTransition(L""), "border transition defaults to the fade");
-    CHECK(ParseBorderTransition(L"fade"), "border transition fade");
-    CHECK(!ParseBorderTransition(L"instant"), "border transition instant");
-    CHECK(!ParseBorderTransition(L" OFF "), "border transition off");
 
     CHECK(AnimationProgress(0, 100) == 0.0, "an animation starts at zero");
     CHECK(AnimationProgress(100, 100) == 1.0, "and is done at its duration");
@@ -1271,7 +1267,6 @@ static void TestBorderFade() {
     const COLORREF kInactive = RGB(0x20, 0x20, 0x20);
     g_settings.borderActive = kActive;
     g_settings.borderInactive = kInactive;
-    g_settings.borderFade = true;
     g_settings.borderFadeDuration = 300;
 
     HWND hwnd = CreateTestWindow(L"Hypr border test", false, 220, 220);
@@ -1319,11 +1314,11 @@ static void TestBorderFade() {
           "landing on the color the last focus change asked for");
 
     // Instant when asked for.
-    g_settings.borderFade = false;
+    g_settings.borderFadeDuration = 0;
     OnWindowActivation(hwnd, false);
     CHECK(!IsBorderFading(hwnd) && CurrentBorderColor(hwnd) == kInactive,
           "the setting switches the color at once instead");
-    g_settings.borderFade = true;
+    g_settings.borderFadeDuration = 300;
 
     // And instant when there is nothing to fade through: "no border" and the
     // system default are states, not colors.

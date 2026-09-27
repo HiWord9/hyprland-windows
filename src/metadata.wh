@@ -66,187 +66,167 @@ the title bar.
 
 // ==WindhawkModSettings==
 /*
-- hotkey: Ctrl+Alt+H
-  $name: Title bar hotkey
-  $description: >-
-    Hides or restores the title bar of the focused window. Combine Ctrl, Alt,
-    Shift and Win with "+", for example Ctrl+Alt+H or Win+Shift+T. Set it to
-    "none" to turn the hotkey off. It takes precedence over a Windows shortcut
-    on the same keys.
-- dragModifier: win
-  $name: Move/resize modifier key
-  $description: >-
-    Hold this key and drag with the left mouse button to move a window, or with
-    the right mouse button to resize it
-  $options:
-  - win: Win (Super)
-  - alt: Alt
-- dragTranslucency: fade
-  $name: Translucency while dragging
-  $description: >-
-    Fade a window to translucent while it is being dragged, the way Hyprland
-    does, and back when the drag ends
-  $options:
-  - fade: While moving and while resizing
-  - move: While moving only
-  - opaque: Never
-- dragOpacity: 85
-  $name: Opacity while dragging
-  $description: >-
-    How opaque the window stays during a drag, in percent. 100 is fully
-    opaque, 10 is barely there.
-- dragFadeIn: 120
-  $name: Fade-in time
-  $description: How long the window takes to get there, in milliseconds
-- dragFadeOut: 60
-  $name: Fade-out time
-  $description: >-
-    How long it takes to come back once the drag ends, in milliseconds
-- snap: both
-  $name: Magnetic edges while dragging
-  $description: >-
-    A window being moved or resized sticks to the edges of other windows and
-    of the screen when it comes close, the way a floating window does in
-    Hyprland.
-  $options:
-  - both: To other windows and to the screen
-  - windows: To other windows only
-  - monitor: To the screen only
-  - none: Off
-- snapDistance: 12
-  $name: Magnet strength
-  $description: >-
-    How close an edge has to come before it sticks, in pixels at 100% scaling
-- snapWindowGap: 0
-  $name: Gap between windows
-  $description: >-
-    How much room to leave when a window sticks to another one, in pixels.
-    0 puts them edge to edge.
-- snapMonitorGap: 0
-  $name: Gap at the screen edge
-  $description: >-
-    How much room to leave when a window sticks to the edge of the screen,
-    in pixels
-- snapModifier: ctrl
-  $name: Extra key for the magnet
-  $description: >-
-    A key held along with the move/resize modifier, so that edges are only
-    magnetic when you want them to be. "none" makes them always magnetic.
-  $options:
-  - ctrl: Ctrl
-  - shift: Shift
-  - alt: Alt
-  - none: No extra key
-- snapModifierWhen: hold
-  $name: What that key does
-  $options:
-  - hold: The edges are magnetic only while it is held
-  - suppress: The edges are magnetic unless it is held
-- keepAspectModifier: shift
-  $name: Keep the shape while resizing
-  $description: >-
-    Hold this key while resizing a window to keep its proportions. The magnet
-    steps aside while it is held.
-  $options:
-  - shift: Shift
-  - ctrl: Ctrl
-  - alt: Alt
-  - none: Off
-- doubleClickAction: maximize
-  $name: Modifier + double click
-  $description: >-
-    What a double click with the modifier above held does to the window under
-    the cursor. Worth having because a window with no title bar has nowhere
-    left to double click.
-  $options:
-  - maximize: Maximize the window, or restore it if it is maximized
-  - titleBar: Hide the window's title bar, or bring it back
-  - close: Close the window
-  - none: Nothing
-- doubleClickTime: 0
-  $name: Double click speed
-  $description: >-
-    How long the second click may take, in milliseconds. 0 follows the
-    double-click speed from the Windows mouse settings.
-- windowShortcut: Win+MButton
-  $name: Window shortcut
-  $description: >-
-    A key or a mouse button that acts on a window: with a mouse button it is
-    the window under the cursor, with a key the focused one. Combine Ctrl,
-    Alt, Shift and Win with "+", and use MButton, XButton1 or XButton2 for
-    the mouse - for example Win+MButton, Alt+XButton1 or Win+Q. A key takes
-    precedence over a Windows shortcut on the same keys, so Win+W can close
-    windows instead of opening the widgets. Set it to "none" to turn it off.
-    Left and right are taken by move and resize, and binding one of them here
-    takes it away from the drag.
-- windowShortcutAction: close
-  $name: What the window shortcut does
-  $options:
-  - close: Close the window
-  - maximize: Maximize the window, or restore it if it is maximized
-  - titleBar: Hide the window's title bar, or bring it back
-  - none: Nothing
-- topEdgeResize: false
-  $name: Resize from the top edge
-  $description: >-
-    When the title bar is hidden, the top few pixels of the window act as a
-    resize handle, like the other edges. Off by default, because it takes those
-    pixels away from whatever the app draws there.
-- menuBarWindows: hide
-  $name: Windows with a menu bar
-  $description: >-
-    What to do with windows that have a classic menu bar below the title bar
-  $options:
-  - hide: Hide the menu bar too (keyboard access via Alt / F10 still works)
-  - keepMenu: Keep the menu bar, remove only the title bar
-  - skip: Don't touch such windows
-- hideByDefault: false
-  $name: Hide title bars by default
-  $description: >-
-    Automatically hide the title bar of every new window. Use the hotkey to
-    bring it back for a specific window.
-- hideByDefaultExclude:
-  - mspaint.exe
-  - SnippingTool.exe
-  $name: Keep the title bar in these programs
-  $description: >-
-    Programs "Hide title bars by default" leaves alone, by file name (for
-    example notepad.exe). The hotkey still hides their title bar. Paint and
-    the Snipping Tool are here because Win + mouse can't move them, so without
-    a title bar there is nothing left to grab them by.
-- borderActive: ""
-  $name: Border color of the active window
-  $description: >-
-    "#RRGGBB" for a color, "accent" for the Windows accent color, "none" for
-    no border, empty for the system default.
-- borderInactive: ""
-  $name: Border color of inactive windows
-  $description: >-
-    "#RRGGBB" for a color, "accent" for the Windows accent color, "none" for
-    no border, empty for the system default.
-- borderFramelessOnly: false
-  $name: Only color windows with a hidden title bar
-  $description: >-
-    Off, the two colors above apply to every window with a frame. On, only to
-    the ones the mod has taken the title bar from.
-- borderTransition: fade
-  $name: Border color transition
-  $description: >-
-    What happens to the border color when a window gains or loses focus. Only
-    has anything to fade when both colors above are set to a color - "none"
-    and the system default are not colors to fade through.
-  $options:
-  - fade: Fade from one color to the other
-  - instant: Change at once
-- borderFadeDuration: 150
-  $name: Border fade time
-  $description: How long that fade takes, in milliseconds
-- corners: default
-  $name: Corners of windows with a hidden title bar
-  $options:
-  - default: System default
-  - round: Rounded
-  - roundsmall: Slightly rounded
-  - none: Square
+- drag:
+  - modifier: win
+    $name: Modifier key
+    $description: >-
+      Hold it and drag with the left mouse button to move a window, or with
+      the right one to resize it
+    $options:
+    - win: Win (Super)
+    - alt: Alt
+  - keepAspect: shift
+    $name: Keep the shape while resizing
+    $description: >-
+      Hold this key while resizing to keep the window's proportions. The
+      magnet steps aside while it is held.
+    $options:
+    - shift: Shift
+    - ctrl: Ctrl
+    - alt: Alt
+    - none: Off
+  - translucency: fade
+    $name: Translucency while dragging
+    $description: >-
+      Fade a window to translucent while it is dragged, the way Hyprland does
+    $options:
+    - fade: While moving and while resizing
+    - move: While moving only
+    - opaque: Never
+  - opacity: 85
+    $name: Opacity while dragging
+    $description: In percent - 100 is fully opaque, 10 is barely there
+  - fadeIn: 120
+    $name: Fade-in time
+    $description: How long the window takes to fade, in milliseconds
+  - fadeOut: 60
+    $name: Fade-out time
+    $description: How long it takes to come back once the drag ends, in milliseconds
+  $name: Moving and resizing
+- snap:
+  - mode: both
+    $name: Magnetic edges
+    $description: >-
+      A window being moved or resized sticks to the edges of other windows and
+      of the screen when it comes close, the way a floating window does in
+      Hyprland
+    $options:
+    - both: To other windows and to the screen
+    - windows: To other windows only
+    - monitor: To the screen only
+    - none: Off
+  - modifier: ctrl
+    $name: Extra key
+    $description: >-
+      A key held along with the modifier key, so that edges are only magnetic
+      when you want them to be
+    $options:
+    - ctrl: Ctrl
+    - shift: Shift
+    - alt: Alt
+    - none: No extra key - always magnetic
+  - modifierWhen: hold
+    $name: What the extra key does
+    $options:
+    - hold: The edges are magnetic only while it is held
+    - suppress: The edges are magnetic unless it is held
+  - distance: 12
+    $name: Magnet strength
+    $description: How close an edge has to come before it sticks, in pixels at 100% scaling
+  - windowGap: 0
+    $name: Gap between windows
+    $description: Room left between windows that stick together, in pixels
+  - monitorGap: 0
+    $name: Gap at the screen edge
+    $description: Room left at the edge of the screen, in pixels
+  $name: Magnetic edges
+- gestures:
+  - doubleClickAction: maximize
+    $name: Modifier + double click
+    $description: >-
+      What a double click with the modifier key held does to the window under
+      the cursor - handy once there is no title bar left to double click
+    $options:
+    - maximize: Maximize the window, or restore it
+    - titleBar: Hide the window's title bar, or bring it back
+    - close: Close the window
+    - none: Nothing
+  - doubleClickTime: 0
+    $name: Double click speed
+    $description: >-
+      How long the second click may take, in milliseconds. 0 follows the
+      Windows mouse settings.
+  - shortcut: Win+MButton
+    $name: Window shortcut
+    $description: >-
+      A mouse button acts on the window under the cursor, a key on the focused
+      one - for example Win+MButton, Alt+XButton1 or Win+Q. A key wins over a
+      Windows shortcut on the same keys, such as Win+W. "none" turns it off.
+  - shortcutAction: close
+    $name: What the window shortcut does
+    $options:
+    - close: Close the window
+    - maximize: Maximize the window, or restore it
+    - titleBar: Hide the window's title bar, or bring it back
+    - none: Nothing
+  $name: Gestures
+- titleBar:
+  - hotkey: Ctrl+Alt+H
+    $name: Hotkey
+    $description: >-
+      Hides or restores the title bar of the focused window, for example
+      Ctrl+Alt+H or Win+Shift+T. It wins over a Windows shortcut on the same
+      keys. "none" turns it off.
+  - hideByDefault: false
+    $name: Hide title bars by default
+    $description: >-
+      Every new window opens without a title bar; the hotkey brings it back
+  - exclude:
+    - mspaint.exe
+    - SnippingTool.exe
+    $name: Keep the title bar in these programs
+    $description: >-
+      By file name. Paint and the Snipping Tool are here because Win + mouse
+      can't move them, which leaves nothing to grab them by without a title
+      bar.
+  - menuBar: hide
+    $name: Windows with a menu bar
+    $description: What to do with windows that have a classic menu bar (File, Edit, ...)
+    $options:
+    - hide: Hide the menu bar too (Alt / F10 still reach it)
+    - keepMenu: Keep the menu bar, remove only the title bar
+    - skip: Don't touch such windows
+  - corners: default
+    $name: Corners
+    $description: Of windows whose title bar is hidden
+    $options:
+    - default: System default
+    - round: Rounded
+    - roundsmall: Slightly rounded
+    - none: Square
+  - topEdgeResize: false
+    $name: Resize from the top edge
+    $description: >-
+      The top few pixels of the window become a resize handle, like the other
+      edges - at the cost of whatever the app draws there
+  $name: Title bar
+- border:
+  - active: ""
+    $name: Active window
+    $description: >-
+      "#RRGGBB" for a color, "accent" for the Windows accent color, "none" for
+      no border, empty for the system default
+  - inactive: ""
+    $name: Inactive windows
+    $description: The same, for every other window
+  - framelessOnly: false
+    $name: Only windows with a hidden title bar
+    $description: Off, the colors go to every window with a frame
+  - fadeDuration: 150
+    $name: Fade time
+    $description: >-
+      How long the color takes to change when a window gains or loses focus,
+      in milliseconds. 0 changes it at once.
+  $name: Border colors
 */
 // ==/WindhawkModSettings==

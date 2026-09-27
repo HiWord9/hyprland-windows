@@ -155,13 +155,6 @@ COLORREF ParseBorderColor(PCWSTR raw) {
     return RGB((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF);
 }
 
-// Anything but "instant" fades, so a setting Windhawk has never written out -
-// an empty string - means the fade is on, the way the settings say it is.
-bool ParseBorderTransition(PCWSTR raw) {
-    std::wstring s = NormalizeSettingString(raw);
-    return s != L"INSTANT" && s != L"OFF" && s != L"NONE";
-}
-
 MenuBarMode ParseMenuBarMode(PCWSTR raw) {
     std::wstring s = NormalizeSettingString(raw);
     if (s == L"KEEPMENU") {
@@ -282,85 +275,83 @@ Hotkey ParseHotkey(PCWSTR raw, PCWSTR whenEmpty) {
 }
 
 void LoadSettings() {
-    WindhawkUtils::StringSetting hotkey(Wh_GetStringSetting(L"hotkey"));
+    WindhawkUtils::StringSetting hotkey(Wh_GetStringSetting(L"titleBar.hotkey"));
     g_settings.hotkey = ParseHotkey(hotkey, kDefaultHotkey);
 
     WindhawkUtils::StringSetting shortcut(
-        Wh_GetStringSetting(L"windowShortcut"));
+        Wh_GetStringSetting(L"gestures.shortcut"));
     g_settings.windowShortcut = ParseHotkey(shortcut, kDefaultWindowShortcut);
     WindhawkUtils::StringSetting shortcutAction(
-        Wh_GetStringSetting(L"windowShortcutAction"));
+        Wh_GetStringSetting(L"gestures.shortcutAction"));
     g_settings.windowShortcutAction =
         ParseWindowAction(shortcutAction, WindowAction::Close);
 
-    WindhawkUtils::StringSetting modifier(Wh_GetStringSetting(L"dragModifier"));
+    WindhawkUtils::StringSetting modifier(Wh_GetStringSetting(L"drag.modifier"));
     g_settings.dragModifier = NormalizeSettingString(modifier) == L"ALT"
                                   ? DragModifier::Alt
                                   : DragModifier::Win;
 
-    g_settings.topEdgeResize = Wh_GetIntSetting(L"topEdgeResize") != 0;
+    g_settings.topEdgeResize = Wh_GetIntSetting(L"titleBar.topEdgeResize") != 0;
 
     WindhawkUtils::StringSetting doubleClick(
-        Wh_GetStringSetting(L"doubleClickAction"));
+        Wh_GetStringSetting(L"gestures.doubleClickAction"));
     g_settings.doubleClickAction =
         ParseWindowAction(doubleClick, WindowAction::ToggleMaximize);
     // Zero is a value of its own here - "whatever the mouse settings say" -
     // so it survives the clamp.
     g_settings.doubleClickTime =
-        ClampedSetting(Wh_GetIntSetting(L"doubleClickTime"), 0, 100, 2000);
+        ClampedSetting(Wh_GetIntSetting(L"gestures.doubleClickTime"), 0, 100, 2000);
 
     WindhawkUtils::StringSetting translucency(
-        Wh_GetStringSetting(L"dragTranslucency"));
+        Wh_GetStringSetting(L"drag.translucency"));
     g_settings.dragTranslucency = ParseDragTranslucency(translucency);
-    g_settings.dragOpacity = ClampedSetting(Wh_GetIntSetting(L"dragOpacity"),
+    g_settings.dragOpacity = ClampedSetting(Wh_GetIntSetting(L"drag.opacity"),
                                             kDefaultDragOpacity, 10, 100);
-    g_settings.dragFadeIn = ClampedSetting(Wh_GetIntSetting(L"dragFadeIn"),
+    g_settings.dragFadeIn = ClampedSetting(Wh_GetIntSetting(L"drag.fadeIn"),
                                            kDefaultDragFadeIn, 1, 2000);
-    g_settings.dragFadeOut = ClampedSetting(Wh_GetIntSetting(L"dragFadeOut"),
+    g_settings.dragFadeOut = ClampedSetting(Wh_GetIntSetting(L"drag.fadeOut"),
                                             kDefaultDragFadeOut, 1, 2000);
 
-    WindhawkUtils::StringSetting menuBar(Wh_GetStringSetting(L"menuBarWindows"));
+    WindhawkUtils::StringSetting menuBar(Wh_GetStringSetting(L"titleBar.menuBar"));
     g_settings.menuBarMode = ParseMenuBarMode(menuBar);
     // Decided once for the whole process: the mod runs inside the program,
     // so a program on the list simply never hides anything by default.
-    g_settings.hideByDefault = Wh_GetIntSetting(L"hideByDefault") != 0 &&
-                               !ProgramInListSetting(L"hideByDefaultExclude");
+    g_settings.hideByDefault = Wh_GetIntSetting(L"titleBar.hideByDefault") != 0 &&
+                               !ProgramInListSetting(L"titleBar.exclude");
 
-    WindhawkUtils::StringSetting active(Wh_GetStringSetting(L"borderActive"));
+    WindhawkUtils::StringSetting active(Wh_GetStringSetting(L"border.active"));
     WindhawkUtils::StringSetting inactive(
-        Wh_GetStringSetting(L"borderInactive"));
+        Wh_GetStringSetting(L"border.inactive"));
     g_settings.borderActive = ParseBorderColor(active);
     g_settings.borderInactive = ParseBorderColor(inactive);
 
-    WindhawkUtils::StringSetting transition(
-        Wh_GetStringSetting(L"borderTransition"));
-    g_settings.borderFade = ParseBorderTransition(transition);
     g_settings.borderFramelessOnly =
-        Wh_GetIntSetting(L"borderFramelessOnly") != 0;
+        Wh_GetIntSetting(L"border.framelessOnly") != 0;
+    // Zero is a value of its own here - no fade - so it is not the fallback
+    // other settings make of it.
     g_settings.borderFadeDuration =
-        ClampedSetting(Wh_GetIntSetting(L"borderFadeDuration"),
-                       kDefaultBorderFade, 1, 2000);
+        std::clamp(Wh_GetIntSetting(L"border.fadeDuration"), 0, 2000);
 
-    WindhawkUtils::StringSetting corners(Wh_GetStringSetting(L"corners"));
+    WindhawkUtils::StringSetting corners(Wh_GetStringSetting(L"titleBar.corners"));
     g_settings.corners = ParseCorners(corners);
 
-    WindhawkUtils::StringSetting snap(Wh_GetStringSetting(L"snap"));
+    WindhawkUtils::StringSetting snap(Wh_GetStringSetting(L"snap.mode"));
     g_settings.snap = ParseSnapMode(snap);
-    g_settings.snapDistance = ClampedSetting(Wh_GetIntSetting(L"snapDistance"),
+    g_settings.snapDistance = ClampedSetting(Wh_GetIntSetting(L"snap.distance"),
                                              kDefaultSnapDistance, 1, 64);
     // Zero is a gap of its own here, so it survives the clamp.
     g_settings.snapWindowGap =
-        ClampedSetting(Wh_GetIntSetting(L"snapWindowGap"), 0, 0, 64);
+        ClampedSetting(Wh_GetIntSetting(L"snap.windowGap"), 0, 0, 64);
     g_settings.snapMonitorGap =
-        ClampedSetting(Wh_GetIntSetting(L"snapMonitorGap"), 0, 0, 64);
+        ClampedSetting(Wh_GetIntSetting(L"snap.monitorGap"), 0, 0, 64);
     WindhawkUtils::StringSetting keepAspect(
-        Wh_GetStringSetting(L"keepAspectModifier"));
+        Wh_GetStringSetting(L"drag.keepAspect"));
     g_settings.keepAspectVk = ParseModifierVk(keepAspect, VK_SHIFT);
     WindhawkUtils::StringSetting snapModifier(
-        Wh_GetStringSetting(L"snapModifier"));
+        Wh_GetStringSetting(L"snap.modifier"));
     g_settings.snapModifierVk = ParseModifierVk(snapModifier, VK_CONTROL);
     WindhawkUtils::StringSetting snapModifierWhen(
-        Wh_GetStringSetting(L"snapModifierWhen"));
+        Wh_GetStringSetting(L"snap.modifierWhen"));
     g_settings.snapModifierHold = ParseSnapModifierHold(snapModifierWhen);
 
     Hotkey key = g_settings.hotkey;
