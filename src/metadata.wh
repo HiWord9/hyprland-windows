@@ -1,7 +1,7 @@
 // ==WindhawkMod==
 // @id              hyprland-windows
 // @name            Hyprland Windows
-// @description     Move and resize windows with Win + mouse from anywhere on them, like in Hyprland, and hide title bars with a hotkey
+// @description     Hyprland-style window handling: move, resize, maximize and close windows with Win + mouse from anywhere on them, hide title bars, and color window borders
 // @version         1.0.1
 // @author          hiword9
 // @github          https://github.com/HiWord9
@@ -25,7 +25,7 @@ Window handling the way Hyprland does it, on Windows.
   window; the settings offer other things for it to do.
 * **Win + middle click** - close the window under the cursor. The button, the
   modifiers and the action are all settings; it can be a key instead, such as
-  Win+Q.
+  Win+Q - even one Windows already uses, like Win+W.
 * **Ctrl+Alt+H** - hide the focused window's title bar; press it again to bring
   the title bar back.
 
@@ -37,23 +37,30 @@ well and its edges turn magnetic: bring one close to another window or to the
 edge of the screen and it lines up with it. Hold `Shift` while resizing to
 keep the window's proportions.
 
+Title bars can also go away on their own: with hiding by default turned on,
+every new window opens without one, except the programs on a list of
+exceptions (Paint and the Snipping Tool to begin with).
+
 Give windows a border color - your own, or `accent` to follow the Windows
 accent color - and it fades from one color to the other as focus moves, the
 way a Hyprland border does. That goes for every window with a frame, or only
 for the ones whose title bar is hidden, whichever the settings say.
 
 Everything is configurable in the settings - the hotkey, the modifier key, the
-translucency, the border, and how much of the frame goes away with the title
-bar.
+translucency, the magnet, the border, and how much of the frame goes away with
+the title bar.
 
 ## Good to know
 
 * Apps that draw their own title bar instead of using the system one (Chrome,
   Electron apps, VS Code, Office) are not affected by the hotkey.
-* A window with a classic menu bar (File, Edit, ...) can't keep that menu where
-  it is once the title bar is gone, so by default it is hidden along with it
-  and stays reachable from the keyboard with `Alt` or `F10`. The settings offer
-  the other choices.
+* A window with a classic menu bar (File, Edit, ...) can't keep that menu where it
+  is once the title bar is gone, so by default it is hidden along with it and
+  stays reachable from the keyboard with `Alt` or `F10`. The settings offer the
+  other choices.
+* `Win` + mouse doesn't work over content drawn with WinUI or XAML - Paint,
+  Windows Terminal, the tabs and address bar of File Explorer: Windows hands
+  those clicks to the app past the point where the mod sees them.
 */
 // ==/WindhawkModReadme==
 

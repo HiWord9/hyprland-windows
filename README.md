@@ -1,7 +1,6 @@
 # Hyprland Windows
 
-Window handling the way [Hyprland](https://hypr.land/) does it, on Windows —
-a mod for [Windhawk](https://windhawk.net/).
+Window handling the way [Hyprland](https://hypr.land/) does it, on Windows.
 
 * **Win + left mouse button** — drag a window from anywhere on it, not just by
   its title bar.
@@ -26,13 +25,16 @@ keep the window's proportions.
 
 Title bars can also go away on their own: with hiding by default turned on,
 every new window opens without one, except the programs on a list of
-exceptions (Paint and the Snipping Tool to begin with). Windows can get border
-colors of your choice as well — one for the focused window, one for the rest,
-or the Windows accent color — that fade into each other as the focus moves.
+exceptions (Paint and the Snipping Tool to begin with).
 
-The hotkey, the modifier key, the translucency, the magnet, the borders and how
-much of the frame goes away with the title bar are all configurable in the
-mod's settings in Windhawk.
+Give windows a border color — your own, or `accent` to follow the Windows
+accent color — and it fades from one color to the other as focus moves, the
+way a Hyprland border does. That goes for every window with a frame, or only
+for the ones whose title bar is hidden, whichever the settings say.
+
+Everything is configurable in the settings — the hotkey, the modifier key, the
+translucency, the magnet, the border, and how much of the frame goes away with
+the title bar.
 
 ## Installing
 
@@ -47,13 +49,13 @@ mod's settings in Windhawk.
 
 * Apps that draw their own title bar instead of using the system one (Chrome,
   Electron apps, VS Code, Office) are not affected by the hotkey.
-* `Win` + mouse doesn't work over content drawn with WinUI or XAML — Paint,
-  Windows Terminal, the tabs and address bar of File Explorer: Windows hands
-  those clicks to the app past the point where the mod sees them.
 * A window with a classic menu bar (File, Edit, …) can't keep that menu where it
   is once the title bar is gone, so by default it is hidden along with it and
   stays reachable from the keyboard with `Alt` or `F10`. The settings offer the
   other choices.
+* `Win` + mouse doesn't work over content drawn with WinUI or XAML — Paint,
+  Windows Terminal, the tabs and address bar of File Explorer: Windows hands
+  those clicks to the app past the point where the mod sees them.
 
 ## Working on the source
 
@@ -69,8 +71,8 @@ and assembled into that single file:
 | `src/frame_geometry.cpp` | non-client layout of a window with a hidden title bar |
 | `src/decorations.cpp` | border color (and the fade between the two of them) and corner preference |
 | `src/titlebar.cpp` | hiding/restoring a title bar and the per-window bookkeeping |
-| `src/hotkey.cpp` | the title-bar hotkey |
-| `src/startmenu.cpp` | keeping the Start menu shut after a `Win` + drag |
+| `src/hotkey.cpp` | the key bindings: the title-bar hotkey, and the window shortcut when it is a key |
+| `src/keyboard.cpp` | the mod's keyboard thread: keeping the Start menu shut after a `Win` + gesture, and the key bindings ahead of Windows' own shortcuts |
 | `src/drag.cpp` | `Win` + mouse move and resize |
 | `src/drag_fade.cpp` | fading a window to translucent while it is dragged |
 | `src/actions.cpp` | mouse gestures with the modifier held, and what they do |
