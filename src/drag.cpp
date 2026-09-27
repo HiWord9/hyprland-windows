@@ -116,7 +116,8 @@ bool StartMove(HWND root, POINT pt, MSG* msg) {
 // Started from where the cursor is rather than from the corner, so the grab
 // offset is kept and the resize is relative, like Hyprland's. Because this is
 // the system's own resize loop, GPU-composited windows (Chrome, Electron)
-// reflow live and native menu bars don't flicker.
+// reflow live and native menu bars don't flicker - moving the window from the
+// outside leaves stale content behind instead (test/chrome_resize_probe.cpp).
 //
 // The loop ends when the left button is released, which is never going to
 // happen here - the user releases the right one - so a thread waits for the

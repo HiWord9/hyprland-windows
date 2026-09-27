@@ -1,5 +1,7 @@
-// Keeping the Start menu shut when the Win key is released after a Win +
-// mouse gesture.
+// The mod's keyboard thread: a thread of its own with a low-level keyboard
+// hook, for two things - keeping the Start menu shut after a Win + mouse
+// gesture (the mask, below), and seeing the key bindings before Windows'
+// own shortcuts do (hotkey.cpp).
 //
 // Windows opens the Start menu when the Win key is released and the last key
 // pressed while it was held was the Win key itself (a lone Win tap). A mouse
@@ -9,7 +11,8 @@
 // Win, it auto-repeats, so any mask sent at button-down is undone by the next
 // Win auto-repeat. The reliable fix is to catch the physical Win key-up with a
 // low-level keyboard hook, swallow it, and re-inject a masking key immediately
-// followed by a fresh Win key-up.
+// followed by a fresh Win key-up (test/startmenu_probe.cpp tries the
+// alternatives).
 //
 // Where that hook lives matters as much as what it does. Windows calls a
 // low-level hook on the thread that installed it, and when that thread does
@@ -42,22 +45,22 @@
 
 std::atomic<bool> g_winMaskArmed{false};
 
-constexpr WCHAR kMaskServerClass[] = L"HyprlandWindowsMask_" WH_MOD_ID;
+constexpr WCHAR kKeyboardServerClass[] = L"HyprlandWindowsKeyboard_" WH_MOD_ID;
 constexpr UINT kMaskArm = WM_APP + 1;  // posted to the server: arm for this press
 constexpr UINT kMaskPollMs = 30;
 constexpr UINT_PTR kMaskTimerId = 1;
-constexpr DWORD kMaskServerStartWaitMs = 2000;
+constexpr DWORD kServerStartWaitMs = 2000;
 
-// This process's own server, if it runs one. Guarded by g_maskMutex.
-std::mutex g_maskMutex;
-HWND g_maskServer;
-DWORD g_maskThreadId;
+// This process's own server, if it runs one. Guarded by g_serverMutex.
+std::mutex g_serverMutex;
+HWND g_keyboardServer;
+DWORD g_serverThreadId;
 
 // Only ever touched on the server thread.
-HHOOK g_maskHook;
+HHOOK g_keyboardHook;
 // The hook stays even with no mask armed: in the shell, and in an elevated
 // process while one of its windows is in front.
-bool g_keepKeyHook;
+bool g_keepKeyboardHook;
 HWINEVENTHOOK g_foregroundHook;
 
 bool WinKeyDown() {
@@ -109,37 +112,37 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
 
 // In place while there is a mask armed or a reason to keep it, and not a
 // moment longer.
-void UpdateKeyHook() {
-    bool wanted = !g_uninitializing && (g_keepKeyHook || g_winMaskArmed);
-    if (wanted && !g_maskHook) {
+void UpdateKeyboardHook() {
+    bool wanted = !g_uninitializing && (g_keepKeyboardHook || g_winMaskArmed);
+    if (wanted && !g_keyboardHook) {
         // A low-level hook procedure is called in the thread that installed
         // it, so no module handle is needed.
-        g_maskHook =
+        g_keyboardHook =
             SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc, nullptr, 0);
-        if (!g_maskHook) {
+        if (!g_keyboardHook) {
             Wh_Log(L"WH_KEYBOARD_LL hook failed (%u)", GetLastError());
         }
-    } else if (!wanted && g_maskHook) {
-        UnhookWindowsHookEx(g_maskHook);
-        g_maskHook = nullptr;
+    } else if (!wanted && g_keyboardHook) {
+        UnhookWindowsHookEx(g_keyboardHook);
+        g_keyboardHook = nullptr;
     }
 }
 
-void DisarmOnServer(HWND hwnd) {
+void DisarmMask(HWND hwnd) {
     g_winMaskArmed = false;
     KillTimer(hwnd, kMaskTimerId);
-    UpdateKeyHook();
+    UpdateKeyboardHook();
 }
 
-void ArmOnServer(HWND hwnd) {
+void ArmMask(HWND hwnd) {
     if (g_uninitializing || !WinKeyDown()) {
         // The press is already over, and a mask armed for it now would be
         // left for the next one.
         return;
     }
     g_winMaskArmed = true;
-    UpdateKeyHook();
-    if (!g_maskHook) {
+    UpdateKeyboardHook();
+    if (!g_keyboardHook) {
         g_winMaskArmed = false;
         return;
     }
@@ -163,8 +166,8 @@ void MaskModifierTap() {
 void FollowForeground(HWND foreground) {
     DWORD pid = 0;
     GetWindowThreadProcessId(foreground, &pid);
-    g_keepKeyHook = pid == GetCurrentProcessId();
-    UpdateKeyHook();
+    g_keepKeyboardHook = pid == GetCurrentProcessId();
+    UpdateKeyboardHook();
 }
 
 void CALLBACK OnForegroundChanged(HWINEVENTHOOK, DWORD, HWND hwnd, LONG, LONG,
@@ -172,11 +175,11 @@ void CALLBACK OnForegroundChanged(HWINEVENTHOOK, DWORD, HWND hwnd, LONG, LONG,
     FollowForeground(hwnd);
 }
 
-LRESULT CALLBACK MaskServerProc(HWND hwnd, UINT msg, WPARAM wParam,
+LRESULT CALLBACK KeyboardServerProc(HWND hwnd, UINT msg, WPARAM wParam,
                                 LPARAM lParam) {
     switch (msg) {
         case kMaskArm:
-            ArmOnServer(hwnd);
+            ArmMask(hwnd);
             return 0;
         case WM_TIMER:
             // The hook takes the mask down when it masks a release. A release
@@ -184,7 +187,7 @@ LRESULT CALLBACK MaskServerProc(HWND hwnd, UINT msg, WPARAM wParam,
             // outlived its press would swallow the next one - so the key being
             // up is what ends it.
             if (!g_winMaskArmed || !WinKeyDown()) {
-                DisarmOnServer(hwnd);
+                DisarmMask(hwnd);
             }
             return 0;
     }
@@ -195,11 +198,11 @@ HINSTANCE ThisModule() {
     HMODULE module = nullptr;
     GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                       reinterpret_cast<LPCWSTR>(&MaskServerProc), &module);
+                       reinterpret_cast<LPCWSTR>(&KeyboardServerProc), &module);
     return module;
 }
 
-DWORD WINAPI MaskServerThread(LPVOID param) {
+DWORD WINAPI KeyboardServerThread(LPVOID param) {
     HANDLE ready = param;
     // Registered against this image rather than the process: two copies of
     // the mod can be loaded side by side while one replaces the other, and a
@@ -208,26 +211,26 @@ DWORD WINAPI MaskServerThread(LPVOID param) {
     // both, which is what lets a gesture find whichever server is up.
     HINSTANCE instance = ThisModule();
     WNDCLASSW wc{};
-    wc.lpfnWndProc = MaskServerProc;
+    wc.lpfnWndProc = KeyboardServerProc;
     wc.hInstance = instance;
-    wc.lpszClassName = kMaskServerClass;
+    wc.lpszClassName = kKeyboardServerClass;
     RegisterClassW(&wc);
-    HWND hwnd = CreateWindowExW(0, kMaskServerClass, nullptr, 0, 0, 0, 0, 0,
+    HWND hwnd = CreateWindowExW(0, kKeyboardServerClass, nullptr, 0, 0, 0, 0, 0,
                                 HWND_MESSAGE, nullptr, instance, nullptr);
     if (hwnd) {
         // Gestures in processes of any integrity level ask for a mask here.
         ChangeWindowMessageFilterEx(hwnd, kMaskArm, MSGFLT_ALLOW, nullptr);
     }
     {
-        std::lock_guard<std::mutex> lock(g_maskMutex);
-        g_maskServer = hwnd;
+        std::lock_guard<std::mutex> lock(g_serverMutex);
+        g_keyboardServer = hwnd;
     }
     SetEvent(ready);
 
     if (hwnd) {
         if (IsShellProcess()) {
-            g_keepKeyHook = true;
-            UpdateKeyHook();
+            g_keepKeyboardHook = true;
+            UpdateKeyboardHook();
         } else if (IsElevatedProcess()) {
             // Only the foreground changing, delivered to this thread's queue:
             // Windows does not wait for it, and nothing else comes of it.
@@ -244,16 +247,16 @@ DWORD WINAPI MaskServerThread(LPVOID param) {
             UnhookWinEvent(g_foregroundHook);
             g_foregroundHook = nullptr;
         }
-        g_keepKeyHook = false;
-        DisarmOnServer(hwnd);  // which takes the hook down with it
+        g_keepKeyboardHook = false;
+        DisarmMask(hwnd);  // which takes the hook down with it
         DestroyWindow(hwnd);
     }
     // The class's procedure is in this image, so it has to go with it.
-    UnregisterClassW(kMaskServerClass, instance);
+    UnregisterClassW(kKeyboardServerClass, instance);
     {
-        std::lock_guard<std::mutex> lock(g_maskMutex);
-        g_maskServer = nullptr;
-        g_maskThreadId = 0;
+        std::lock_guard<std::mutex> lock(g_serverMutex);
+        g_keyboardServer = nullptr;
+        g_serverThreadId = 0;
     }
     g_modRefCount--;  // the last thing this thread does in the mod's image
     return 0;
@@ -261,18 +264,18 @@ DWORD WINAPI MaskServerThread(LPVOID param) {
 
 // This process's server, started if it is not running yet. Waits for its
 // window, since the caller is about to post to it.
-HWND StartMaskServer() {
-    std::unique_lock<std::mutex> lock(g_maskMutex);
-    if (g_maskServer || g_maskThreadId || g_uninitializing) {
-        return g_maskServer;  // up, or on its way up
+HWND StartServer() {
+    std::unique_lock<std::mutex> lock(g_serverMutex);
+    if (g_keyboardServer || g_serverThreadId || g_uninitializing) {
+        return g_keyboardServer;  // up, or on its way up
     }
     HANDLE ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!ready) {
         return nullptr;
     }
     g_modRefCount++;
-    HANDLE thread = CreateThread(nullptr, 0, MaskServerThread, ready, 0,
-                                 &g_maskThreadId);
+    HANDLE thread = CreateThread(nullptr, 0, KeyboardServerThread, ready, 0,
+                                 &g_serverThreadId);
     if (!thread) {
         Wh_Log(L"CreateThread failed (%u)", GetLastError());
         g_modRefCount--;
@@ -283,23 +286,23 @@ HWND StartMaskServer() {
     // The thread takes the lock to publish its window, so it is let go of
     // while waiting.
     lock.unlock();
-    WaitForSingleObject(ready, kMaskServerStartWaitMs);
+    WaitForSingleObject(ready, kServerStartWaitMs);
     lock.lock();
     CloseHandle(ready);
-    return g_maskServer;
+    return g_keyboardServer;
 }
 
 // The server that should take this press: the one in the shell's own process
 // when there is one. Explorer can run a second process for folder windows,
 // and that one goes away with them.
-HWND FindMaskServer() {
+HWND FindKeyboardServer() {
     DWORD shellPid = 0;
     if (HWND tray = FindWindowW(L"Shell_TrayWnd", nullptr)) {
         GetWindowThreadProcessId(tray, &shellPid);
     }
     HWND any = nullptr;
     HWND found = nullptr;
-    while ((found = FindWindowExW(HWND_MESSAGE, found, kMaskServerClass,
+    while ((found = FindWindowExW(HWND_MESSAGE, found, kKeyboardServerClass,
                                   nullptr))) {
         DWORD pid = 0;
         GetWindowThreadProcessId(found, &pid);
@@ -336,7 +339,7 @@ void StartKeyboardServer() {
         EnumWindows(FindOwnWindowProc, (LPARAM)&hasWindows);
     }
     if (IsShellProcess() || hasWindows) {
-        StartMaskServer();
+        StartServer();
     }
 }
 
@@ -345,7 +348,7 @@ void StartKeyboardServer() {
 // the like - never run a server at all.
 void StartKeyboardServerForWindow() {
     if (IsElevatedProcess()) {
-        StartMaskServer();
+        StartServer();
     }
 }
 
@@ -373,9 +376,9 @@ void ArmWinMask(bool usingWin) {
     if (!usingWin || g_uninitializing || !WinKeyDown()) {
         return;
     }
-    HWND server = FindMaskServer();
+    HWND server = FindKeyboardServer();
     if (!server) {
-        server = StartMaskServer();
+        server = StartServer();
     }
     if (!server || !PostMessageW(server, kMaskArm, 0, 0)) {
         Wh_Log(L"No Start menu mask to arm (%u)", GetLastError());
@@ -387,7 +390,7 @@ void ArmWinMask(bool usingWin) {
     // the gesture closed the process's last window, the release goes to
     // whatever window comes forward next.
     if (IsElevatedProcess()) {
-        HWND own = StartMaskServer();
+        HWND own = StartServer();
         if (own && own != server) {
             PostMessageW(own, kMaskArm, 0, 0);
         }
@@ -397,10 +400,10 @@ void ArmWinMask(bool usingWin) {
 // Tear the suppression down: this process's server, if it has one, and with
 // it the hook it may still hold. The thread keeps a reference on the image
 // until it is out, which Wh_ModUninit waits for.
-void ShutdownWinMask() {
+void ShutdownKeyboardServer() {
     g_winMaskArmed = false;
-    std::lock_guard<std::mutex> lock(g_maskMutex);
-    if (g_maskThreadId) {
-        PostThreadMessageW(g_maskThreadId, WM_QUIT, 0, 0);
+    std::lock_guard<std::mutex> lock(g_serverMutex);
+    if (g_serverThreadId) {
+        PostThreadMessageW(g_serverThreadId, WM_QUIT, 0, 0);
     }
 }

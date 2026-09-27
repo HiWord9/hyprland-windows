@@ -1406,7 +1406,7 @@ static void TestBorderFade() {
 static void TestWinMask() {
     printf("\n== Start menu mask ==\n");
 
-    ShutdownWinMask();
+    ShutdownKeyboardServer();
     Sleep(100);
     CHECK(!IsShellProcess(), "the harness is not the shell");
 
@@ -1418,17 +1418,17 @@ static void TestWinMask() {
           "and one whose Win press is already over arms nothing either");
 
     // The server: a thread of its own with a window any process can find.
-    HWND server = StartMaskServer();
+    HWND server = StartServer();
     CHECK(server != nullptr, "the mask server starts");
     DWORD pid = 0;
     DWORD serverThread = GetWindowThreadProcessId(server, &pid);
     CHECK(pid == GetCurrentProcessId() &&
               serverThread != GetCurrentThreadId(),
           "on a thread of its own, not the one that asked for it");
-    CHECK(StartMaskServer() == server, "and there is only ever one of them");
+    CHECK(StartServer() == server, "and there is only ever one of them");
     bool findable = false;
     for (HWND found = nullptr; (found = FindWindowExW(
-                                    HWND_MESSAGE, found, kMaskServerClass,
+                                    HWND_MESSAGE, found, kKeyboardServerClass,
                                     nullptr));) {
         findable = findable || found == server;
     }
@@ -1444,16 +1444,16 @@ static void TestWinMask() {
     CHECK(passed == 0 && !g_winMaskArmed,
           "a release another mask made stands this one down");
 
-    ShutdownWinMask();
+    ShutdownKeyboardServer();
     for (int i = 0; i < 40 && IsWindow(server); i++) {
         Sleep(25);
     }
     CHECK(!IsWindow(server), "and the teardown takes the server away");
     {
-        std::lock_guard<std::mutex> lock(g_maskMutex);
-        CHECK(g_maskServer == nullptr && g_maskThreadId == 0,
+        std::lock_guard<std::mutex> lock(g_serverMutex);
+        CHECK(g_keyboardServer == nullptr && g_serverThreadId == 0,
               "leaving nothing behind for the next one to trip over");
-        CHECK(g_maskHook == nullptr && g_foregroundHook == nullptr,
+        CHECK(g_keyboardHook == nullptr && g_foregroundHook == nullptr,
               "neither a keyboard hook nor a foreground subscription");
     }
 }
@@ -1552,10 +1552,10 @@ static void TestKeyBindings(bool noInput) {
     SetForegroundWindow(hwnd);
     Pump(200);
     FollowForeground(hwnd);
-    CHECK(g_keepKeyHook && g_maskHook != nullptr,
+    CHECK(g_keepKeyboardHook && g_keyboardHook != nullptr,
           "a window of this process in front: the hook is in place");
     FollowForeground(FindWindowW(L"Shell_TrayWnd", nullptr));
-    CHECK(!g_keepKeyHook && g_maskHook == nullptr,
+    CHECK(!g_keepKeyboardHook && g_keyboardHook == nullptr,
           "someone else's window in front: it is gone again");
 
     g_settings.windowShortcut = savedShortcut;

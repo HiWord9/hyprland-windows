@@ -37,7 +37,7 @@ MODULES = [
     "decorations.cpp",
     "titlebar.cpp",
     "hotkey.cpp",
-    "startmenu.cpp",
+    "keyboard.cpp",
     "drag.cpp",
     "drag_fade.cpp",
     "actions.cpp",

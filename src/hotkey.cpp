@@ -38,8 +38,8 @@ bool HandleHotkey(const MSG* msg) {
 //
 // Windows takes the keys of its own shortcuts - Win+W, Win+E... - before any
 // window gets them, so a binding on one of those never reaches HandleHotkey.
-// The keyboard hook of the mask server (startmenu.cpp) sees every key first
-// and hands it here. A key it takes never reaches a window, so nothing is done
+// The keyboard thread's hook (keyboard.cpp) sees every key first and hands
+// it here. A key it takes never reaches a window, so nothing is done
 // twice, and HandleHotkey keeps working where there is no such hook.
 
 // The key whose press was taken, so that its repeats and its release are

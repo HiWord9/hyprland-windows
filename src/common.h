@@ -265,7 +265,7 @@ bool IsShellProcess();
 bool IsElevatedProcess();
 void StartKeyboardServer();
 void StartKeyboardServerForWindow();
-void ShutdownWinMask();
+void ShutdownKeyboardServer();
 bool HandleBindingKey(UINT vk, bool down);
 
 // A drag is requested with this message, posted to the window that is to be

@@ -117,7 +117,7 @@ static int Busy() {
                       : "arming thread pumping (control)",
                opened, armed, tap);
     }
-    ShutdownWinMask();
+    ShutdownKeyboardServer();
     PumpFor(300);
     return 0;
 }
@@ -141,7 +141,7 @@ static int Dying() {
     HWND serverWindow = nullptr;
     for (int i = 0; i < 50 && !serverWindow; i++) {
         Sleep(100);
-        serverWindow = FindWindowExW(HWND_MESSAGE, nullptr, kMaskServerClass,
+        serverWindow = FindWindowExW(HWND_MESSAGE, nullptr, kKeyboardServerClass,
                                      nullptr);
     }
     printf("mask server in another process: %s\n",
@@ -185,7 +185,7 @@ int wmain(int argc, wchar_t** argv) {
     std::wstring mode = argc > 1 ? argv[1] : L"busy";
 
     if (mode == L"server") {
-        StartMaskServer();
+        StartServer();
         PumpFor(60000);  // until the probe kills it
         return 0;
     }

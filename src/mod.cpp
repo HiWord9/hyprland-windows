@@ -54,7 +54,7 @@ void Wh_ModBeforeUninit() {
 
     // Take our hook procedures out before the DLL goes away.
     RemoveMessageHooks();
-    ShutdownWinMask();
+    ShutdownKeyboardServer();
 
     // And stop the border fades before the windows get their defaults back:
     // a color written after that would stay on the window for good.

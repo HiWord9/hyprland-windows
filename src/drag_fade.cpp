@@ -158,7 +158,8 @@ void BeginDragFade(HWND root, WPARAM kind) {
     DragFade fade;
     LONG_PTR exStyle = GetWindowLongPtrW(root, GWL_EXSTYLE);
     if (exStyle & WS_EX_LAYERED) {
-        // Two states to stay out of, and the same reason for both: a window
+        // Two states to stay out of (test/layered_probe.cpp shows all of
+        // them), and the same reason for both: a window
         // that has nothing to read either composites itself with
         // UpdateLayeredWindow already (which reports no attributes at all) or
         // is layered without having said how yet (which reports none set),
