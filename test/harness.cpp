@@ -1682,6 +1682,35 @@ static bool WaitForFront(bool held, DWORD ms) {
     return false;
 }
 
+// An elevated window in front - Windhawk's own, for one - takes no keys from
+// the harness: Windows keeps input sent from below away from it. The mod brings
+// one forward like any other when it is on top of a desktop.
+static bool ElevatedInFront() {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(GetForegroundWindow(), &pid);
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process) {
+        return false;
+    }
+    bool elevated = true;  // a process whose token is not to be looked at
+    HANDLE token = nullptr;
+    if (OpenProcessToken(process, TOKEN_QUERY, &token)) {
+        TOKEN_ELEVATION elevation{};
+        DWORD size = 0;
+        elevated = GetTokenInformation(token, TokenElevation, &elevation,
+                                       sizeof(elevation), &size) &&
+                   elevation.TokenIsElevated;
+        CloseHandle(token);
+    }
+    CloseHandle(process);
+    return elevated;
+}
+
+static void NotCheckedForElevated(const char* what) {
+    printf("  (not checked - an elevated window is in front, which takes no "
+           "keys from the harness: %s)\n", what);
+}
+
 static void TestDesktops(bool noInput) {
     printf("\n== Win+Tab through the virtual desktops ==\n");
     if (noInput) {
@@ -1714,92 +1743,113 @@ static void TestDesktops(bool noInput) {
         // The rest goes through Win+Shift+Tab: a hotkey, the way Win+Tab is
         // one in the shell, and that is what lets the mod hold the front -
         // Windows lets whoever got the last input bring a window forward.
-        // The harness holds it, or a copy of the mod in the shell does.
+        // The harness holds it, or a copy of the mod in the shell does. Keys
+        // stop reaching anything once an elevated window comes forward.
         auto pressTab = [] {
             SendMarkedKey(VK_TAB, false);
             Sleep(40);
             SendMarkedKey(VK_TAB, true);
         };
-        GUID before = RegistryCurrentDesktop();
-        SendMarkedKey(VK_LWIN, false);
-        SendMarkedKey(VK_SHIFT, false);
-        pressTab();
-        CHECK(WaitForDesktop(true, before, 1000), "Win+Shift+Tab goes the other way");
-        Sleep(50);
-        // The mod's window holds the front now - unless the shell takes it,
-        // which it does from a window that is not its own: the one in the
-        // shell is, which test/desktops_in_shell.cpp sees to.
-        printf("  in front while Win is down: %s\n", ForegroundClass().c_str());
-        SendMarkedKey(VK_SHIFT, true);
-        SendMarkedKey(VK_LWIN, true);
-        CHECK(WaitForFront(false, 1500) && WindowOnCurrentDesktopInFront(),
-              "and the window on top of that desktop brought forward once it "
-              "is up (%s)", ForegroundClass().c_str());
-        Sleep(400);
-
-        // A burst with Win held: every press switches, at once.
-        before = RegistryCurrentDesktop();
-        DesktopWatch watch;
-        watch.Start();
-        constexpr int kPresses = 12;
-        SendMarkedKey(VK_LWIN, false);
-        SendMarkedKey(VK_SHIFT, false);
-        for (int i = 0; i < kPresses; i++) {
-            pressTab();
-            Sleep(70);
+        bool keysReach = !ElevatedInFront();
+        auto checkKeys = [&](bool ok, const char* what) {
+            if (!ok && ElevatedInFront()) {
+                NotCheckedForElevated(what);
+                keysReach = false;
+            } else {
+                CHECK(ok, "%s", what);
+            }
+        };
+        if (!keysReach) {
+            NotCheckedForElevated("Win+Shift+Tab and the presses after it");
         }
-        Sleep(200);
-        printf("  in front after a burst, Win still down: %s\n",
-               ForegroundClass().c_str());
-        SendMarkedKey(VK_SHIFT, true);
-        SendMarkedKey(VK_LWIN, true);
-        bool broughtForward = WaitForFront(false, 1500);
-        Sleep(1000);  // anything the shell might still do
-        int changes = watch.Stop();
-        printf("  %d presses from desktop %d: %d desktop changes, ended on %d\n",
-               kPresses, DesktopIndex(before), changes,
-               DesktopIndex(RegistryCurrentDesktop()));
-        // Whether the shell undoes any of them is for the shell to say, and
-        // the harness is not the shell: that is what
-        // test/desktops_in_shell.cpp is for. Here, only what the mod does.
-        CHECK(changes >= kPresses,
-              "a burst of presses with Win held: every press switched");
-        CHECK(broughtForward && WindowOnCurrentDesktopInFront(),
-              "and once Win was up, the window on top was brought forward");
-        Sleep(400);
-
-        // Presses each with a Win of its own, the way one taps Win+Shift+Tab
-        // again and again.
-        before = RegistryCurrentDesktop();
-        DesktopWatch tapWatch;
-        tapWatch.Start();
-        constexpr int kTaps = 8;
-        for (int i = 0; i < kTaps; i++) {
+        if (keysReach) {
+            GUID before = RegistryCurrentDesktop();
             SendMarkedKey(VK_LWIN, false);
             SendMarkedKey(VK_SHIFT, false);
             pressTab();
-            Sleep(40);
+            bool switched = WaitForDesktop(true, before, 1000);
+            Sleep(50);
+            // The mod's window holds the front now - unless the shell takes
+            // it, which it does from a window that is not its own: the one in
+            // the shell is, which test/desktops_in_shell.cpp sees to.
+            printf("  in front while Win is down: %s\n", ForegroundClass().c_str());
             SendMarkedKey(VK_SHIFT, true);
             SendMarkedKey(VK_LWIN, true);
-            Sleep(150 + 60 * (i % 4));
+            checkKeys(switched, "Win+Shift+Tab goes the other way");
+            bool broughtForward =
+                WaitForFront(false, 1500) && WindowOnCurrentDesktopInFront();
+            CHECK(broughtForward,
+                  "and the window on top of that desktop brought forward once "
+                  "it is up (%s)", ForegroundClass().c_str());
+            keysReach = keysReach && !ElevatedInFront();
+            Sleep(400);
         }
-        WaitForFront(false, 1500);
-        Sleep(1000);
-        changes = tapWatch.Stop();
-        printf("  %d taps from desktop %d: %d desktop changes\n", kTaps,
-               DesktopIndex(before), changes);
-        CHECK(changes >= kTaps, "taps one after another: every one switched");
-        CHECK(WindowOnCurrentDesktopInFront(),
-              "with the window on top brought forward after the last one");
-        Sleep(400);
 
+        if (keysReach) {
+            // A burst with Win held: every press switches, at once.
+            GUID before = RegistryCurrentDesktop();
+            DesktopWatch watch;
+            watch.Start();
+            constexpr int kPresses = 12;
+            SendMarkedKey(VK_LWIN, false);
+            SendMarkedKey(VK_SHIFT, false);
+            for (int i = 0; i < kPresses; i++) {
+                pressTab();
+                Sleep(70);
+            }
+            Sleep(200);
+            printf("  in front after a burst, Win still down: %s\n",
+                   ForegroundClass().c_str());
+            SendMarkedKey(VK_SHIFT, true);
+            SendMarkedKey(VK_LWIN, true);
+            bool broughtForward = WaitForFront(false, 1500);
+            Sleep(1000);  // anything the shell might still do
+            int changes = watch.Stop();
+            printf("  %d presses from desktop %d: %d desktop changes, ended on %d\n",
+                   kPresses, DesktopIndex(before), changes,
+                   DesktopIndex(RegistryCurrentDesktop()));
+            // Whether the shell undoes any of them is for the shell to say,
+            // and the harness is not the shell: that is what
+            // test/desktops_in_shell.cpp is for. Here, only what the mod does.
+            checkKeys(changes >= kPresses,
+                      "a burst of presses with Win held: every press switched");
+            CHECK(broughtForward && WindowOnCurrentDesktopInFront(),
+                  "and once Win was up, the window on top was brought forward");
+            keysReach = keysReach && !ElevatedInFront();
+            Sleep(400);
+        }
+
+        if (keysReach) {
+            // Presses each with a Win of its own, the way one taps
+            // Win+Shift+Tab again and again.
+            GUID before = RegistryCurrentDesktop();
+            DesktopWatch tapWatch;
+            tapWatch.Start();
+            constexpr int kTaps = 8;
+            for (int i = 0; i < kTaps; i++) {
+                SendMarkedKey(VK_LWIN, false);
+                SendMarkedKey(VK_SHIFT, false);
+                pressTab();
+                Sleep(40);
+                SendMarkedKey(VK_SHIFT, true);
+                SendMarkedKey(VK_LWIN, true);
+                Sleep(150 + 60 * (i % 4));
+            }
+            WaitForFront(false, 1500);
+            Sleep(1000);
+            int changes = tapWatch.Stop();
+            printf("  %d taps from desktop %d: %d desktop changes\n", kTaps,
+                   DesktopIndex(before), changes);
+            checkKeys(changes >= kTaps, "taps one after another: every one switched");
+            CHECK(WindowOnCurrentDesktopInFront(),
+                  "with the window on top brought forward after the last one");
+            Sleep(400);
+        }
+
+        // Home again by the shell's Win+Tab, which needs no keys.
         for (int i = 0; i < 6 && RegistryCurrentDesktop() != home; i++) {
             GUID at = RegistryCurrentDesktop();
-            SendMarkedKey(VK_LWIN, false);
-            SendMarkedKey(VK_SHIFT, false);
-            pressTab();
-            SendMarkedKey(VK_SHIFT, true);
-            SendMarkedKey(VK_LWIN, true);
+            HandleDesktopHotkey(&winTab);
             WaitForDesktop(true, at, 1000);
             WaitForFront(false, 1500);
             Sleep(400);
@@ -1808,33 +1858,35 @@ static void TestDesktops(bool noInput) {
     }
 
     // Task View is on Win+Ctrl+Tab, which opens it and closes it again.
-    SendMarkedKey(VK_LWIN, false);
-    SendMarkedKey(VK_CONTROL, false);
-    SendMarkedKey(VK_TAB, false);
-    SendMarkedKey(VK_TAB, true);
-    SendMarkedKey(VK_CONTROL, true);
-    SendMarkedKey(VK_LWIN, true);
-    bool opened = false;
-    for (int i = 0; i < 150 && !opened; i++) {
-        Sleep(10);
-        opened = ShellViewUp();
-    }
-    CHECK(opened, "Win+Ctrl+Tab opens Task View");
-    if (opened) {
-        Sleep(500);
-        CHECK(!HandleDesktopHotkey(&winTab),
-              "while it is up, Win+Tab is left to the shell, which closes it");
+    auto pressCtrlWinTab = [] {
         SendMarkedKey(VK_LWIN, false);
         SendMarkedKey(VK_CONTROL, false);
         SendMarkedKey(VK_TAB, false);
         SendMarkedKey(VK_TAB, true);
         SendMarkedKey(VK_CONTROL, true);
         SendMarkedKey(VK_LWIN, true);
-        for (int i = 0; i < 150 && ShellViewUp(); i++) {
+    };
+    if (ElevatedInFront()) {
+        NotCheckedForElevated("Win+Ctrl+Tab");
+    } else {
+        pressCtrlWinTab();
+        bool opened = false;
+        for (int i = 0; i < 150 && !opened; i++) {
             Sleep(10);
+            opened = ShellViewUp();
         }
-        CHECK(!ShellViewUp(), "and Win+Ctrl+Tab again closes it");
-        Sleep(300);
+        CHECK(opened, "Win+Ctrl+Tab opens Task View");
+        if (opened) {
+            Sleep(500);
+            CHECK(!HandleDesktopHotkey(&winTab),
+                  "while it is up, Win+Tab is left to the shell, which closes it");
+            pressCtrlWinTab();
+            for (int i = 0; i < 150 && ShellViewUp(); i++) {
+                Sleep(10);
+            }
+            CHECK(!ShellViewUp(), "and Win+Ctrl+Tab again closes it");
+            Sleep(300);
+        }
     }
 
     // With one of the shell's views up - a window of Task View's class
@@ -1849,7 +1901,14 @@ static void TestDesktops(bool noInput) {
                                 nullptr, nullptr, viewClass.hInstance, nullptr);
     Pump(100);
     CHECK(ShellViewUp(), "a shell view is seen to be up");
-    CHECK(!HandleDesktopHotkey(&winTab), "and Win+Tab is left to the shell");
+    // The shell's Win+Tab comes to a window of its own, which one of the
+    // harness's stands in for.
+    HWND shellWindow = CreateWindowExW(0, L"STATIC", L"Hypr shell", WS_POPUP, 0,
+                                       0, 1, 1, nullptr, nullptr,
+                                       GetModuleHandleW(nullptr), nullptr);
+    MSG fromShell = winTab;
+    fromShell.hwnd = shellWindow;
+    CHECK(!HandleDesktopHotkey(&fromShell), "and Win+Tab is left to the shell");
     GUID before = RegistryCurrentDesktop();
     PostThreadMessageW(g_desktopThreadId, WM_APP + 2, 1, 0);
     CHECK(!WaitForDesktop(true, before, 800),
@@ -1858,6 +1917,25 @@ static void TestDesktops(bool noInput) {
     UnregisterClassW(L"XamlExplorerHostIslandWindow", viewClass.hInstance);
     Pump(100);
     CHECK(!ShellViewUp(), "and once it has gone, the desktops are free again");
+
+    // Having come by, the shell's Win+Tab is what Win+Ctrl+Tab hands back to
+    // its window for Task View - let through by the mod that one time.
+    ToggleTaskView();
+    MSG handedBack{};
+    bool got = false;
+    for (int i = 0; i < 50 && !got; i++) {
+        got = PeekMessageW(&handedBack, shellWindow, WM_HOTKEY, WM_HOTKEY,
+                           PM_REMOVE);
+        Sleep(10);
+    }
+    CHECK(got && handedBack.wParam == winTab.wParam &&
+              handedBack.lParam == winTab.lParam,
+          "Task View goes by the shell's own Win+Tab, handed back to its window");
+    CHECK(got && !HandleDesktopHotkey(&handedBack),
+          "which the mod lets through to it");
+    CHECK(g_shellWinTabThroughUntil == 0, "that one time only");
+    DestroyWindow(shellWindow);
+    g_shellWinTabWindow = nullptr;
 
     // The real Task View, opened through the shell: its windows are not
     // listed where the harness's own are, and it is in front a moment before

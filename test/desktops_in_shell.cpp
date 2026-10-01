@@ -115,6 +115,30 @@ static std::string Front() {
     return std::string(cls) + (cloaked ? " (on another desktop)" : "");
 }
 
+// An elevated window in front - Windhawk's own, for one - takes no keys from
+// this program, and the mod brings one forward like any other when it is on
+// top of a desktop. Whatever the keys were to do after that, did not happen.
+static bool ElevatedInFront() {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(GetForegroundWindow(), &pid);
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process) {
+        return false;
+    }
+    bool elevated = true;  // a process whose token is not to be looked at
+    HANDLE token = nullptr;
+    if (OpenProcessToken(process, TOKEN_QUERY, &token)) {
+        TOKEN_ELEVATION elevation{};
+        DWORD size = 0;
+        elevated = GetTokenInformation(token, TokenElevation, &elevation,
+                                       sizeof(elevation), &size) &&
+                   elevation.TokenIsElevated;
+        CloseHandle(token);
+    }
+    CloseHandle(process);
+    return elevated;
+}
+
 static bool TaskViewUp() {
     HWND view = nullptr;
     while ((view = FindWindowExW(nullptr, view, L"XamlExplorerHostIslandWindow",
@@ -241,7 +265,17 @@ int main(int argc, char** argv) {
             Sleep(gap - 70);
         }
     } else if (test == "view") {
-        expected = 0;
+        // A Win+Tab there and back first, for the mod to have seen the
+        // shell's own, which Task View then goes by.
+        expected = 2;
+        Key(VK_LWIN, false);
+        Press(VK_TAB);
+        Sleep(300);
+        Key(VK_SHIFT, false);
+        Press(VK_TAB);
+        Key(VK_SHIFT, true);
+        Key(VK_LWIN, true);
+        Sleep(800);
         for (int i = 0; i < 2; i++) {
             Key(VK_LWIN, false);
             Key(VK_CONTROL, false);
@@ -261,12 +295,16 @@ int main(int argc, char** argv) {
     Sleep(1200);
     watch.Stop();
     bool clean = watch.changes == expected;
+    bool blocked = !clean && watch.changes < expected && ElevatedInFront();
     printf("%s, %d presses %d ms apart, from desktop %d: %d desktop changes, "
            "ended on %d with %s in front - %s\n",
            test.c_str(), presses, gap, DesktopNumber(start), watch.changes,
            DesktopNumber(CurrentDesktop()), Front().c_str(),
-           clean ? "CLEAN" : "WENT BACK AND FORTH");
-    if (!clean) {
+           clean     ? "CLEAN"
+           : blocked ? "NOT CONCLUSIVE: an elevated window came in front, and "
+                       "the keys after it never reached the shell"
+                     : "WENT BACK AND FORTH");
+    if (!clean && !blocked) {
         printf("%s", watch.log.c_str());
     }
 

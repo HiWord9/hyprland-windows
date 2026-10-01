@@ -248,6 +248,15 @@ std::mutex g_desktopThreadMutex;
 std::atomic<DWORD> g_desktopThreadId;
 constexpr DWORD kDesktopThreadStartWaitMs = 2000;
 
+// The shell's own Win+Tab, as it came by: the window it is posted to and its
+// hotkey ID. Win+Ctrl+Tab hands it back to that window, which opens Task View
+// quicker than anything else - and the hand-over is let through once, until
+// this time, rather than taken for the next desktop.
+std::atomic<HWND> g_shellWinTabWindow;
+std::atomic<WPARAM> g_shellWinTabId;
+std::atomic<DWORD> g_shellWinTabThroughUntil;
+constexpr DWORD kShellWinTabThroughMs = 1000;
+
 // Only touched on the desktop thread.
 HWND g_frontHolder;
 bool g_hotkeysRegistered;
@@ -422,8 +431,18 @@ void StepDesktop(int steps) {
     SetTimer(g_frontHolder, kBringForwardTimer, kBringForwardPollMs, nullptr);
 }
 
-// Task View, opened - or closed, when it is up - the way its shortcut does it.
+// Task View, opened - or closed, when it is up - by the shell's own Win+Tab
+// once one has come by, and the way its shortcut does it before that.
 void ToggleTaskView() {
+    HWND shellWindow = g_shellWinTabWindow;
+    if (shellWindow && IsWindow(shellWindow)) {
+        g_shellWinTabThroughUntil = GetTickCount() + kShellWinTabThroughMs;
+        if (PostMessageW(shellWindow, WM_HOTKEY, g_shellWinTabId,
+                         MAKELPARAM(MOD_WIN, VK_TAB))) {
+            return;
+        }
+        g_shellWinTabThroughUntil = 0;
+    }
     ShellExecuteW(nullptr, L"open",
                   L"shell:::{3080F90E-D7AD-11D9-BD98-0000947B0257}", nullptr,
                   nullptr, SW_SHOWNORMAL);
@@ -547,8 +566,17 @@ void ShutdownDesktopThread() {
 bool HandleDesktopHotkey(const MSG* msg) {
     DWORD threadId = g_desktopThreadId;
     if (!threadId || LOWORD(msg->lParam) != MOD_WIN ||
-        HIWORD(msg->lParam) != VK_TAB || !g_settings.desktopWinTab ||
-        g_desktopSwitchUnsupported || ShellViewUp()) {
+        HIWORD(msg->lParam) != VK_TAB) {
+        return false;
+    }
+    if (msg->hwnd) {
+        g_shellWinTabWindow = msg->hwnd;
+        g_shellWinTabId = msg->wParam;
+    }
+    DWORD throughUntil = g_shellWinTabThroughUntil.exchange(0);
+    if ((throughUntil && (int)(throughUntil - GetTickCount()) > 0) ||
+        !g_settings.desktopWinTab || g_desktopSwitchUnsupported ||
+        ShellViewUp()) {
         return false;
     }
     return PostThreadMessageW(threadId, kDesktopStepMessage, 1, 0) != FALSE;
