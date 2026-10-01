@@ -2,13 +2,17 @@
 // is covered too) with Windhawk's WH_EDITING stubs and exercises it against
 // real windows on the desktop. Run build.ps1, which bundles first.
 //
-// Usage: harness.exe [--dpi-unaware] [--no-input]
+// Usage: harness.exe [--dpi-unaware] [--no-input] [--desktops]
 //   --dpi-unaware   don't opt into per-monitor DPI awareness
 //   --no-input      skip the tests that inject mouse input
+//   --desktops      only the Win+Tab tests
 #include "../build/hyprland-windows.wh.cpp"
 
+#include <dwmapi.h>
+#include <shellapi.h>
 #include <tlhelp32.h>
 
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <thread>
@@ -1485,6 +1489,17 @@ static void SendKey(WORD vk, bool up) {
     SendInput(1, &in, sizeof(in));
 }
 
+// A key the mod's hooks let by, as they do its own mask: no copy of the mod
+// running on this machine takes it.
+static void SendMarkedKey(WORD vk, bool up) {
+    INPUT in{};
+    in.type = INPUT_KEYBOARD;
+    in.ki.wVk = vk;
+    in.ki.dwFlags = up ? KEYEVENTF_KEYUP : 0;
+    in.ki.dwExtraInfo = kInjectedMarker;
+    SendInput(1, &in, sizeof(in));
+}
+
 static void TestKeyBindings(bool noInput) {
     printf("\n== key bindings through the keyboard hook ==\n");
 
@@ -1557,6 +1572,345 @@ static void TestKeyBindings(bool noInput) {
     g_settings.windowShortcutAction = savedAction;
     DestroyWindow(hwnd);
     Pump(100);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Win+Tab through the virtual desktops
+
+static GUID RegistryCurrentDesktop() {
+    GUID g{};
+    HKEY key;
+    if (!RegOpenKeyExW(HKEY_CURRENT_USER,
+                       L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer"
+                       L"\\VirtualDesktops",
+                       0, KEY_READ, &key)) {
+        DWORD size = sizeof(g);
+        RegQueryValueExW(key, L"CurrentVirtualDesktop", nullptr, nullptr,
+                         (BYTE*)&g, &size);
+        RegCloseKey(key);
+    }
+    return g;
+}
+
+static bool WaitForDesktop(bool changedFrom, GUID desktop, DWORD ms) {
+    DWORD end = GetTickCount() + ms;
+    while ((int)(end - GetTickCount()) > 0) {
+        if ((RegistryCurrentDesktop() != desktop) == changedFrom) {
+            return true;
+        }
+        Sleep(20);
+    }
+    return false;
+}
+
+static int DesktopIndex(GUID desktop) {
+    GUID ids[32]{};
+    DWORD size = sizeof(ids);
+    HKEY key;
+    if (!RegOpenKeyExW(HKEY_CURRENT_USER,
+                       L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer"
+                       L"\\VirtualDesktops",
+                       0, KEY_READ, &key)) {
+        RegQueryValueExW(key, L"VirtualDesktopIDs", nullptr, nullptr,
+                         (BYTE*)ids, &size);
+        RegCloseKey(key);
+    }
+    for (int i = 0; i < (int)(size / sizeof(GUID)); i++) {
+        if (ids[i] == desktop) {
+            return i + 1;
+        }
+    }
+    return 0;
+}
+
+// What the shell's thread gets for Win+Tab: its hotkey's message.
+static MSG WinTabHotkey(UINT modifiers = MOD_WIN) {
+    MSG msg{};
+    msg.message = WM_HOTKEY;
+    msg.wParam = 11;
+    msg.lParam = MAKELPARAM(modifiers, VK_TAB);
+    return msg;
+}
+
+// Desktop changes, counted by a thread of their own while presses come.
+struct DesktopWatch {
+    std::atomic<bool> stop{false};
+    std::atomic<int> changes{0};
+    std::thread thread;
+    void Start() {
+        thread = std::thread([this] {
+            GUID last = RegistryCurrentDesktop();
+            while (!stop) {
+                GUID now = RegistryCurrentDesktop();
+                if (now != last) {
+                    changes++;
+                    last = now;
+                }
+                Sleep(2);
+            }
+        });
+    }
+    int Stop() {
+        stop = true;
+        thread.join();
+        return changes;
+    }
+};
+
+static std::string ForegroundClass() {
+    char cls[64] = "";
+    GetClassNameA(GetForegroundWindow(), cls, sizeof(cls));
+    return GetForegroundWindow() == g_frontHolder ? "the mod's front holder" : cls;
+}
+
+static bool WindowOnCurrentDesktopInFront() {
+    HWND fg = GetForegroundWindow();
+    DWORD cloaked = 0;
+    DwmGetWindowAttribute(fg, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
+    return fg && fg != g_frontHolder && !cloaked &&
+           (IsFrameWindow(fg) || fg == GetShellWindow());
+}
+
+static bool WaitForFront(bool held, DWORD ms) {
+    DWORD end = GetTickCount() + ms;
+    while ((int)(end - GetTickCount()) > 0) {
+        if ((GetForegroundWindow() == g_frontHolder) == held) {
+            return true;
+        }
+        Sleep(10);
+    }
+    return false;
+}
+
+static void TestDesktops(bool noInput) {
+    printf("\n== Win+Tab through the virtual desktops ==\n");
+    if (noInput) {
+        return;
+    }
+    g_settings.desktopWinTab = true;
+
+    MSG winTab = WinTabHotkey();
+    CHECK(!HandleDesktopHotkey(&winTab),
+          "with no desktop thread, Win+Tab is left to the shell");
+    // The harness stands in for the shell: the desktop thread runs here, and
+    // the shell's Win+Tab is handed to it the way the shell's thread does.
+    StartDesktopThread();
+    CHECK(g_desktopThreadId != 0, "the desktop thread is up");
+    MSG other = WinTabHotkey(MOD_WIN | MOD_SHIFT);
+    CHECK(!HandleDesktopHotkey(&other), "a hotkey other than Win+Tab is left alone");
+
+    GUID home = RegistryCurrentDesktop();
+    CHECK(HandleDesktopHotkey(&winTab), "Win+Tab is taken");
+    if (!WaitForDesktop(true, home, 1000)) {
+        printf("  (no other desktop with windows on it - switching not "
+               "checked)\n");
+    } else {
+        CHECK(g_layout != nullptr,
+              "it goes to another desktop, through the shell's own desktop "
+              "manager");
+        WaitForFront(false, 1500);
+        Sleep(400);
+
+        // The rest goes through Win+Shift+Tab: a hotkey, the way Win+Tab is
+        // one in the shell, and that is what lets the mod hold the front -
+        // Windows lets whoever got the last input bring a window forward.
+        // The harness holds it, or a copy of the mod in the shell does.
+        auto pressTab = [] {
+            SendMarkedKey(VK_TAB, false);
+            Sleep(40);
+            SendMarkedKey(VK_TAB, true);
+        };
+        GUID before = RegistryCurrentDesktop();
+        SendMarkedKey(VK_LWIN, false);
+        SendMarkedKey(VK_SHIFT, false);
+        pressTab();
+        CHECK(WaitForDesktop(true, before, 1000), "Win+Shift+Tab goes the other way");
+        Sleep(50);
+        // The mod's window holds the front now - unless the shell takes it,
+        // which it does from a window that is not its own: the one in the
+        // shell is, which test/desktops_in_shell.cpp sees to.
+        printf("  in front while Win is down: %s\n", ForegroundClass().c_str());
+        SendMarkedKey(VK_SHIFT, true);
+        SendMarkedKey(VK_LWIN, true);
+        CHECK(WaitForFront(false, 1500) && WindowOnCurrentDesktopInFront(),
+              "and the window on top of that desktop brought forward once it "
+              "is up (%s)", ForegroundClass().c_str());
+        Sleep(400);
+
+        // A burst with Win held: every press switches, at once.
+        before = RegistryCurrentDesktop();
+        DesktopWatch watch;
+        watch.Start();
+        constexpr int kPresses = 12;
+        SendMarkedKey(VK_LWIN, false);
+        SendMarkedKey(VK_SHIFT, false);
+        for (int i = 0; i < kPresses; i++) {
+            pressTab();
+            Sleep(70);
+        }
+        Sleep(200);
+        printf("  in front after a burst, Win still down: %s\n",
+               ForegroundClass().c_str());
+        SendMarkedKey(VK_SHIFT, true);
+        SendMarkedKey(VK_LWIN, true);
+        bool broughtForward = WaitForFront(false, 1500);
+        Sleep(1000);  // anything the shell might still do
+        int changes = watch.Stop();
+        printf("  %d presses from desktop %d: %d desktop changes, ended on %d\n",
+               kPresses, DesktopIndex(before), changes,
+               DesktopIndex(RegistryCurrentDesktop()));
+        // Whether the shell undoes any of them is for the shell to say, and
+        // the harness is not the shell: that is what
+        // test/desktops_in_shell.cpp is for. Here, only what the mod does.
+        CHECK(changes >= kPresses,
+              "a burst of presses with Win held: every press switched");
+        CHECK(broughtForward && WindowOnCurrentDesktopInFront(),
+              "and once Win was up, the window on top was brought forward");
+        Sleep(400);
+
+        // Presses each with a Win of its own, the way one taps Win+Shift+Tab
+        // again and again.
+        before = RegistryCurrentDesktop();
+        DesktopWatch tapWatch;
+        tapWatch.Start();
+        constexpr int kTaps = 8;
+        for (int i = 0; i < kTaps; i++) {
+            SendMarkedKey(VK_LWIN, false);
+            SendMarkedKey(VK_SHIFT, false);
+            pressTab();
+            Sleep(40);
+            SendMarkedKey(VK_SHIFT, true);
+            SendMarkedKey(VK_LWIN, true);
+            Sleep(150 + 60 * (i % 4));
+        }
+        WaitForFront(false, 1500);
+        Sleep(1000);
+        changes = tapWatch.Stop();
+        printf("  %d taps from desktop %d: %d desktop changes\n", kTaps,
+               DesktopIndex(before), changes);
+        CHECK(changes >= kTaps, "taps one after another: every one switched");
+        CHECK(WindowOnCurrentDesktopInFront(),
+              "with the window on top brought forward after the last one");
+        Sleep(400);
+
+        for (int i = 0; i < 6 && RegistryCurrentDesktop() != home; i++) {
+            GUID at = RegistryCurrentDesktop();
+            SendMarkedKey(VK_LWIN, false);
+            SendMarkedKey(VK_SHIFT, false);
+            pressTab();
+            SendMarkedKey(VK_SHIFT, true);
+            SendMarkedKey(VK_LWIN, true);
+            WaitForDesktop(true, at, 1000);
+            WaitForFront(false, 1500);
+            Sleep(400);
+        }
+        CHECK(RegistryCurrentDesktop() == home, "back where the harness started");
+    }
+
+    // Task View is on Win+Ctrl+Tab, which opens it and closes it again.
+    SendMarkedKey(VK_LWIN, false);
+    SendMarkedKey(VK_CONTROL, false);
+    SendMarkedKey(VK_TAB, false);
+    SendMarkedKey(VK_TAB, true);
+    SendMarkedKey(VK_CONTROL, true);
+    SendMarkedKey(VK_LWIN, true);
+    bool opened = false;
+    for (int i = 0; i < 150 && !opened; i++) {
+        Sleep(10);
+        opened = ShellViewUp();
+    }
+    CHECK(opened, "Win+Ctrl+Tab opens Task View");
+    if (opened) {
+        Sleep(500);
+        CHECK(!HandleDesktopHotkey(&winTab),
+              "while it is up, Win+Tab is left to the shell, which closes it");
+        SendMarkedKey(VK_LWIN, false);
+        SendMarkedKey(VK_CONTROL, false);
+        SendMarkedKey(VK_TAB, false);
+        SendMarkedKey(VK_TAB, true);
+        SendMarkedKey(VK_CONTROL, true);
+        SendMarkedKey(VK_LWIN, true);
+        for (int i = 0; i < 150 && ShellViewUp(); i++) {
+            Sleep(10);
+        }
+        CHECK(!ShellViewUp(), "and Win+Ctrl+Tab again closes it");
+        Sleep(300);
+    }
+
+    // With one of the shell's views up - a window of Task View's class
+    // stands in for it - the desktops are left alone.
+    WNDCLASSW viewClass{};
+    viewClass.lpfnWndProc = DefWindowProcW;
+    viewClass.hInstance = GetModuleHandleW(nullptr);
+    viewClass.lpszClassName = L"XamlExplorerHostIslandWindow";
+    RegisterClassW(&viewClass);
+    HWND view = CreateWindowExW(WS_EX_TOOLWINDOW, L"XamlExplorerHostIslandWindow",
+                                L"Task View", WS_POPUP | WS_VISIBLE, 0, 0, 1, 1,
+                                nullptr, nullptr, viewClass.hInstance, nullptr);
+    Pump(100);
+    CHECK(ShellViewUp(), "a shell view is seen to be up");
+    CHECK(!HandleDesktopHotkey(&winTab), "and Win+Tab is left to the shell");
+    GUID before = RegistryCurrentDesktop();
+    PostThreadMessageW(g_desktopThreadId, WM_APP + 2, 1, 0);
+    CHECK(!WaitForDesktop(true, before, 800),
+          "and a step that comes in all the same switches nothing");
+    DestroyWindow(view);
+    UnregisterClassW(L"XamlExplorerHostIslandWindow", viewClass.hInstance);
+    Pump(100);
+    CHECK(!ShellViewUp(), "and once it has gone, the desktops are free again");
+
+    // The real Task View, opened through the shell: its windows are not
+    // listed where the harness's own are, and it is in front a moment before
+    // it is shown.
+    ShellExecuteW(nullptr, L"open",
+                  L"shell:::{3080F90E-D7AD-11D9-BD98-0000947B0257}", nullptr,
+                  nullptr, SW_SHOWNORMAL);
+    bool inFront = false, seenInFront = true, shown = false;
+    for (int i = 0; i < 300 && !shown; i++) {
+        HWND fg = GetForegroundWindow();
+        WCHAR cls[64] = L"";
+        if (GetClassNameW(fg, cls, ARRAYSIZE(cls)) &&
+            !wcscmp(cls, L"XamlExplorerHostIslandWindow")) {
+            inFront = true;
+            seenInFront = seenInFront && ShellViewUp();
+            shown = IsWindowVisible(fg);
+        }
+        Sleep(5);
+    }
+    if (!inFront) {
+        printf("  (Task View did not come up - not checked)\n");
+    } else {
+        CHECK(seenInFront && shown,
+              "the real Task View is seen, from the moment it is in front");
+        SendKey(VK_ESCAPE, false);
+        SendKey(VK_ESCAPE, true);
+        for (int i = 0; i < 100 && ShellViewUp(); i++) {
+            Sleep(20);
+        }
+        CHECK(!ShellViewUp(), "and no longer once it has closed");
+    }
+
+    auto previousHotkeyFree = [] {
+        if (!RegisterHotKey(nullptr, 1, MOD_WIN | MOD_SHIFT | MOD_NOREPEAT,
+                            VK_TAB)) {
+            return false;
+        }
+        UnregisterHotKey(nullptr, 1);
+        return true;
+    };
+    bool heldBefore = !previousHotkeyFree();
+    ShutdownDesktopThread();
+    for (int i = 0; i < 40 && g_desktopThreadId; i++) {
+        Sleep(25);
+    }
+    CHECK(!g_desktopThreadId && !g_desktopManager && !g_internalManager &&
+              !g_frontHolder,
+          "the desktop thread goes, and lets go of the shell and its window");
+    if (previousHotkeyFree()) {
+        CHECK(heldBefore, "and of the hotkeys it held");
+    } else {
+        printf("  (Win+Shift+Tab is held by a copy of the mod in the shell)\n");
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2144,10 +2498,11 @@ static void TestDragFade() {
 int main(int argc, char** argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     printf("harness start\n");
-    bool dpiUnaware = false, noInput = false;
+    bool dpiUnaware = false, noInput = false, onlyDesktops = false;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--dpi-unaware")) dpiUnaware = true;
         if (!strcmp(argv[i], "--no-input")) noInput = true;
+        if (!strcmp(argv[i], "--desktops")) onlyDesktops = true;
     }
     if (!dpiUnaware) {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -2170,6 +2525,11 @@ int main(int argc, char** argv) {
     // is on this desktop would otherwise have a say in it.
     g_settings.snap = SnapMode::Off;
 
+    if (onlyDesktops) {
+        TestDesktops(false);
+        printf("\n%d passed, %d failed\n", g_passes, g_failures);
+        return g_failures ? 1 : 0;
+    }
     TestParsers();
     TestFramelessGeometry(false, MenuBarMode::Hide);
     TestFramelessGeometry(true, MenuBarMode::Hide);
@@ -2181,6 +2541,7 @@ int main(int argc, char** argv) {
     TestBorderScope();
     TestWinMask();
     TestKeyBindings(noInput);
+    TestDesktops(noInput);
     TestSnapGeometry();
     TestGestures();
     TestResizeRelease();

@@ -11,9 +11,11 @@
 #                           what keeps each module usable as a single file in
 #                           an IDE (and catches a declaration missing from
 #                           common.h that the bundle would happily hide)
-param([switch]$Bundle, [switch]$Harness, [switch]$Check)
+#   .\build.ps1 -Shell      bundle + test\desktops_in_shell.exe/.dll, which try
+#                           Win+Tab in the shell itself
+param([switch]$Bundle, [switch]$Harness, [switch]$Check, [switch]$Shell)
 $ErrorActionPreference = 'Continue'
-if (-not $Bundle -and -not $Harness -and -not $Check) { $Harness = $true }
+if (-not $Bundle -and -not $Harness -and -not $Check -and -not $Shell) { $Harness = $true }
 
 $root = $PSScriptRoot
 $compiler = 'C:\Program Files\Windhawk\Compiler'
@@ -45,7 +47,19 @@ try {
         Write-Host "=== harness ==="
         & $clang @common '-O1' '-g' '-Wno-unused-function' '-include' 'windhawk_api.h' `
             '-target' 'x86_64-w64-mingw32' '-static' '-x' 'c++' "$root\test\harness.cpp" `
-            '-o' "$root\test\harness.exe" '-lcomctl32' '-ldwmapi' '-lgdi32' '-luser32'
+            '-o' "$root\test\harness.exe" '-lcomctl32' '-ldwmapi' '-lgdi32' '-luser32' '-lole32' '-luuid'
+        if ($LASTEXITCODE -ne 0) { $failed = $true }
+        Write-Host "exit: $LASTEXITCODE"
+    }
+    if ($Shell) {
+        Write-Host "=== desktops in the shell ==="
+        $source = "$root\test\desktops_in_shell.cpp"
+        & $clang @common '-O1' '-Wno-unused-function' '-include' 'windhawk_api.h' `
+            '-target' 'x86_64-w64-mingw32' '-static' '-shared' '-DSHELL_DLL' '-x' 'c++' $source `
+            '-o' "$root\test\desktops_in_shell.dll" '-lcomctl32' '-ldwmapi' '-lgdi32' '-luser32' '-lole32' '-luuid'
+        if ($LASTEXITCODE -ne 0) { $failed = $true }
+        & $clang '-O1' '-Wall' '-target' 'x86_64-w64-mingw32' '-static' '-x' 'c++' $source `
+            '-o' "$root\test\desktops_in_shell.exe" '-luser32' '-ladvapi32' '-ldwmapi' '-lwinmm'
         if ($LASTEXITCODE -ne 0) { $failed = $true }
         Write-Host "exit: $LASTEXITCODE"
     }

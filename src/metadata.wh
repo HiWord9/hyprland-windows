@@ -6,7 +6,7 @@
 // @author          hiword9
 // @github          https://github.com/HiWord9
 // @include         *
-// @compilerOptions -lcomctl32 -ldwmapi
+// @compilerOptions -lcomctl32 -ldwmapi -lole32 -luuid
 // @license         GPL-3.0
 // ==/WindhawkMod==
 
@@ -28,6 +28,8 @@ Window handling the way Hyprland does it, on Windows.
   Win+Q - even one Windows already uses, like Win+W.
 * **Ctrl+Alt+H** - hide the focused window's title bar; press it again to bring
   the title bar back.
+* **Win+Tab** - go to the next virtual desktop that has windows on it, at once;
+  Win+Shift+Tab goes back. Task View moves to Win+Ctrl+Tab.
 
 Moving and resizing feel like the real thing: windows still snap to the screen
 edges, dragging one to the top still offers the Windows 11 snap layouts, and
@@ -228,5 +230,14 @@ the title bar.
       How long the color takes to change when a window gains or loses focus,
       in milliseconds. 0 changes it at once.
   $name: Border colors
+- desktops:
+  - winTab: true
+    $name: Win+Tab switches desktops
+    $description: >-
+      Win+Tab goes to the next virtual desktop that has windows on it, at once,
+      and Win+Shift+Tab to the previous one - round and round, the way Alt+Tab
+      goes round windows. Task View, which Win+Tab opens in Windows, is on
+      Win+Ctrl+Tab then. Off, Win+Tab is left alone.
+  $name: Virtual desktops
 */
 // ==/WindhawkModSettings==

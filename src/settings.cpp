@@ -332,6 +332,8 @@ void LoadSettings() {
     g_settings.borderFadeDuration =
         std::clamp(Wh_GetIntSetting(L"border.fadeDuration"), 0, 2000);
 
+    g_settings.desktopWinTab = Wh_GetIntSetting(L"desktops.winTab") != 0;
+
     WindhawkUtils::StringSetting corners(Wh_GetStringSetting(L"titleBar.corners"));
     g_settings.corners = ParseCorners(corners);
 

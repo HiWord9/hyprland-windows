@@ -39,6 +39,10 @@ void Wh_ModAfterInit() {
     // mouse gesture and sees the key bindings first - up from the start, so it
     // is there to be found.
     StartKeyboardServer();
+    // And the one that takes Win+Tab through the desktops.
+    if (IsShellProcess()) {
+        StartDesktopThread();
+    }
     RefreshBorderColors();
     if (g_settings.hideByDefault) {
         AutoHideExistingWindows();
@@ -55,6 +59,7 @@ void Wh_ModBeforeUninit() {
     // Take our hook procedures out before the DLL goes away.
     RemoveMessageHooks();
     ShutdownKeyboardServer();
+    ShutdownDesktopThread();
 
     // And stop the border fades before the windows get their defaults back:
     // a color written after that would stay on the window for good.
@@ -117,6 +122,7 @@ void Wh_ModSettingsChanged() {
     // this goes over all of them rather than over the frameless ones.
     RefreshCallWndProcHooks();
     RefreshBorderColors();
+    DesktopSettingsChanged();
 
     if (g_settings.hideByDefault) {
         AutoHideExistingWindows();

@@ -14,6 +14,8 @@ Window handling the way [Hyprland](https://hypr.land/) does it, on Windows.
   Win+Q — even one Windows already uses, like Win+W.
 * **Ctrl+Alt+H** — hide the focused window's title bar; press it again to bring
   the title bar back.
+* **Win+Tab** — go to the next virtual desktop that has windows on it, at once;
+  Win+Shift+Tab goes back. Task View moves to Win+Ctrl+Tab.
 
 Moving and resizing feel like the real thing: windows still snap to the screen
 edges, dragging one to the top still offers the Windows 11 snap layouts, and
@@ -73,6 +75,7 @@ and assembled into that single file:
 | `src/titlebar.cpp` | hiding/restoring a title bar and the per-window bookkeeping |
 | `src/hotkey.cpp` | the key bindings: the title-bar hotkey, and the window shortcut when it is a key |
 | `src/keyboard.cpp` | the mod's keyboard thread: keeping the Start menu shut after a `Win` + gesture, and the key bindings ahead of Windows' own shortcuts |
+| `src/desktops.cpp` | `Win`+`Tab` through the virtual desktops |
 | `src/drag.cpp` | `Win` + mouse move and resize |
 | `src/drag_fade.cpp` | fading a window to translucent while it is dragged |
 | `src/actions.cpp` | mouse gestures with the modifier held, and what they do |
