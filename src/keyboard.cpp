@@ -77,6 +77,9 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
     auto* info = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
     bool keyUp = wParam == WM_KEYUP || wParam == WM_SYSKEYUP;
     bool ours = info->dwExtraInfo == kInjectedMarker;
+    if (!ours && !keyUp) {
+        BringDesktopForwardForKey(info->vkCode);
+    }
     if (!ours && HandleBindingKey(info->vkCode, !keyUp)) {
         return 1;
     }

@@ -260,6 +260,7 @@ constexpr ULONG_PTR kInjectedMarker = 0x48797072;  // 'Hypr'
 
 void ArmWinMask(bool usingWin);
 void MaskModifierTap();
+bool WinKeyDown();
 bool IsShellProcess();
 bool IsElevatedProcess();
 void StartKeyboardServer();
@@ -272,6 +273,7 @@ void StartDesktopThread();
 void DesktopSettingsChanged();
 void ShutdownDesktopThread();
 bool HandleDesktopHotkey(const MSG* msg);
+void BringDesktopForwardForKey(UINT vk);
 
 // A drag is requested with this message, posted to the window that is to be
 // moved or resized - see the comment at the top of drag.cpp.

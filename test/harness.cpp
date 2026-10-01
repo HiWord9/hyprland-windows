@@ -1737,6 +1737,25 @@ static void TestDesktops(bool noInput) {
         CHECK(g_layout != nullptr,
               "it goes to another desktop, through the shell's own desktop "
               "manager");
+        // A key that is not for switching brings the window on top forward
+        // at once, ahead of the key itself; one held for a chord does not.
+        Sleep(100);
+        if (GetForegroundWindow() == g_frontHolder) {
+            BringDesktopForwardForKey(VK_LSHIFT);
+            CHECK(GetForegroundWindow() == g_frontHolder,
+                  "Shift, which may be for the next switch, leaves the front "
+                  "held");
+            BringDesktopForwardForKey('A');
+            for (int i = 0; i < 50 && !WindowOnCurrentDesktopInFront(); i++) {
+                Sleep(10);
+            }
+            CHECK(WindowOnCurrentDesktopInFront(),
+                  "any other key brings the window on top forward at once (%s)",
+                  ForegroundClass().c_str());
+        } else {
+            printf("  (the front was not held here, by a window not the "
+                   "shell's - keys not checked)\n");
+        }
         WaitForFront(false, 1500);
         Sleep(400);
 
@@ -1976,6 +1995,24 @@ static void TestDesktops(bool noInput) {
         UnregisterHotKey(nullptr, 1);
         return true;
     };
+
+    // Turned off in the settings, Win+Tab is the shell's again and the
+    // mod's two hotkeys are let go of; back on, they are taken again.
+    g_settings.desktopWinTab = false;
+    DesktopSettingsChanged();
+    Sleep(200);
+    CHECK(!HandleDesktopHotkey(&winTab), "turned off, Win+Tab is left to the shell");
+    bool freeWhenOff = previousHotkeyFree();
+    g_settings.desktopWinTab = true;
+    DesktopSettingsChanged();
+    Sleep(200);
+    if (freeWhenOff) {
+        CHECK(!previousHotkeyFree(),
+              "and Win+Shift+Tab is free while it is off, and taken back after");
+    } else {
+        printf("  (Win+Shift+Tab is held by a copy of the mod in the shell)\n");
+    }
+
     bool heldBefore = !previousHotkeyFree();
     ShutdownDesktopThread();
     for (int i = 0; i < 40 && g_desktopThreadId; i++) {

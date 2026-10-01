@@ -16,6 +16,7 @@
 //   desktops_in_shell.exe taps  [presses] [ms apart]   Win+Tab again and again
 //   desktops_in_shell.exe shift [presses] [ms apart]   Win+Shift+Tab, Win held
 //   desktops_in_shell.exe view                         Win+Ctrl+Tab, twice
+//   desktops_in_shell.exe type  [presses]              keys typed right after a switch
 //
 // With --mod at the end, the DLL stays out of it: the keys go to the copy of
 // the mod Windhawk has compiled and loaded into the shell.
@@ -186,6 +187,27 @@ struct Watch {
     }
 };
 
+// A key as a hand would press it: unmarked, for the mod's hooks to see.
+static void PlainKey(WORD vk, bool up) {
+    INPUT in{};
+    in.type = INPUT_KEYBOARD;
+    in.ki.wVk = vk;
+    in.ki.dwFlags = up ? KEYEVENTF_KEYUP : 0;
+    SendInput(1, &in, sizeof(in));
+}
+
+static void Pump(DWORD ms) {
+    DWORD start = GetTickCount();
+    do {
+        MSG msg;
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        Sleep(5);
+    } while (GetTickCount() - start < ms);
+}
+
 static void Press(WORD vk) {
     Key(vk, false);
     Sleep(40);
@@ -263,6 +285,58 @@ int main(int argc, char** argv) {
             Sleep(30);
             Key(VK_LWIN, true);
             Sleep(gap - 70);
+        }
+    } else if (test == "type") {
+        // The first keys typed after a switch go to the window on top of the
+        // desktop, which the mod brings forward ahead of them, rather than to
+        // the window holding the front. A window of this program's takes them:
+        // it goes off to the previous desktop and back, and is typed into
+        // straight away.
+        expected = presses * 2;
+        HWND edit = CreateWindowExW(0, L"EDIT", L"Hyprland Windows typing",
+                                    WS_OVERLAPPEDWINDOW | WS_VISIBLE, 300, 300,
+                                    420, 140, nullptr, nullptr, nullptr, nullptr);
+        Key(0xE8, false);  // the last input is this program's: it may come forward
+        Key(0xE8, true);
+        SetForegroundWindow(edit);
+        Pump(300);
+        int typed = 0;
+        for (int i = 0; i < presses; i++) {
+            SetWindowTextW(edit, L"");
+            Key(VK_LWIN, false);
+            Key(VK_SHIFT, false);
+            Press(VK_TAB);
+            Key(VK_SHIFT, true);
+            Key(VK_LWIN, true);
+            Pump(250);
+            Key(VK_LWIN, false);
+            Press(VK_TAB);
+            Key(VK_LWIN, true);
+            Pump(30);
+            PlainKey('X', false);
+            PlainKey('X', true);
+            PlainKey('Y', false);
+            PlainKey('Y', true);
+            Pump(300);
+            WCHAR text[16] = L"";
+            GetWindowTextW(edit, text, 16);
+            typed += !wcscmp(text, L"xy");
+            if (wcscmp(text, L"xy")) {
+                printf("press %d: the window got \"%ls\"\n", i + 1, text);
+            }
+            Pump(700);
+        }
+        printf("typed in full right after the switch: %d of %d\n", typed, presses);
+        if (typed != presses) {
+            expected = -1;  // not clean, whatever the desktops did
+        }
+        // Closed, the window hands the front on - to a window under it, and
+        // not to the one that held the front.
+        DestroyWindow(edit);
+        Pump(500);
+        if (Front() == "(the mod's holder)") {
+            printf("the window closed, and the front went to the mod's holder\n");
+            expected = -1;
         }
     } else if (test == "view") {
         // A Win+Tab there and back first, for the mod to have seen the

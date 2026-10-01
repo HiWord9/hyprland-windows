@@ -24,11 +24,13 @@
 // and forth. So while the presses come, the front is held by a window of the
 // mod's own that belongs to no desktop: nothing is brought forward, and there
 // is nothing to follow. The window on top of the desktop the presses ended on
-// comes forward once Win is up and the shell has had its moment, and a press
-// right after that waits for the shell to have taken it in.
+// comes forward with the first key that is not for switching, or a while after
+// the last one, and a press right after that waits for the shell to have taken
+// it in.
 //
 // Task View and the Alt+Tab switcher are left alone while they are up: a
-// Win+Tab then goes to Windows, which closes Task View for it.
+// Win+Tab then goes to Windows, which closes Task View for it. With no other
+// desktop to go to, Win+Tab opens Task View, as in Windows.
 #include "common.h"
 
 #include <dwmapi.h>
@@ -223,10 +225,12 @@ bool ShellViewUp() {
 // The window that holds the front while the presses come: a tool window,
 // which no desktop has for its own, out of sight.
 //
-// Once the presses have stopped and Win is up, the window on top of the
-// desktop they ended on comes forward - this long after the last switch, by
-// which time the shell has done with it.
-constexpr DWORD kBringForwardAfterMs = 300;
+// The window on top of the desktop the presses ended on comes forward with the
+// first key that is not for switching - before that key gets anywhere, so it
+// goes to that window - or by itself once Win is up and this long has gone by
+// since the last switch. Not sooner: a window that comes forward between two
+// presses is one the shell may take the desktops back to.
+constexpr DWORD kBringForwardAfterMs = 1000;
 constexpr UINT kBringForwardPollMs = 15;
 constexpr UINT_PTR kBringForwardTimer = 1;
 // And a switch waits for the front to have stayed put this long: the shell
@@ -257,18 +261,17 @@ std::atomic<WPARAM> g_shellWinTabId;
 std::atomic<DWORD> g_shellWinTabThroughUntil;
 constexpr DWORD kShellWinTabThroughMs = 1000;
 
+// Made and destroyed on the desktop thread, and looked at by the keyboard
+// thread as well.
+std::atomic<HWND> g_frontHolder;
+
 // Only touched on the desktop thread.
-HWND g_frontHolder;
 bool g_hotkeysRegistered;
+bool g_holdingFront;  // the holder has the front on purpose
 bool g_bringForwardPending;
 DWORD g_switchedAt;
 HWINEVENTHOOK g_frontChangeHook;
 DWORD g_frontChangedAt;  // last time a window other than the holder came forward
-
-bool WinKeyHeld() {
-    return ((GetAsyncKeyState(VK_LWIN) | GetAsyncKeyState(VK_RWIN)) & 0x8000) !=
-           0;
-}
 
 // The window the shell would bring forward on the current desktop: the
 // topmost one there that takes the focus.
@@ -286,18 +289,30 @@ BOOL CALLBACK FindTopWindowProc(HWND hwnd, LPARAM lParam) {
     return FALSE;
 }
 
+// Once a window has the front again, the holder goes to the bottom: when the
+// window in front closes, Windows hands the front to the one under it, and
+// that is not to be the holder.
 void StopBringingForward() {
+    g_holdingFront = false;
     g_bringForwardPending = false;
-    if (g_frontHolder) {
-        KillTimer(g_frontHolder, kBringForwardTimer);
+    if (HWND holder = g_frontHolder) {
+        KillTimer(holder, kBringForwardTimer);
+        if (GetForegroundWindow() != holder) {
+            SetWindowPos(holder, HWND_BOTTOM, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
     }
 }
 
-void BringForward() {
+void BringTopWindowForward() {
     HWND top = nullptr;
     EnumWindows(FindTopWindowProc, (LPARAM)&top);
     // A desktop with no window of that kind has its wallpaper in front.
     SetForegroundWindow(top ? top : GetShellWindow());
+}
+
+void BringForward() {
+    BringTopWindowForward();
     StopBringingForward();
 }
 
@@ -309,7 +324,7 @@ void OnBringForwardTimer() {
         StopBringingForward();
         return;
     }
-    if (WinKeyHeld() || GetTickCount() - g_switchedAt < kBringForwardAfterMs) {
+    if (WinKeyDown() || GetTickCount() - g_switchedAt < kBringForwardAfterMs) {
         return;
     }
     BringForward();
@@ -319,6 +334,10 @@ void CALLBACK OnFrontChanged(HWINEVENTHOOK, DWORD, HWND hwnd, LONG, LONG, DWORD,
                              DWORD) {
     if (hwnd != g_frontHolder) {
         g_frontChangedAt = GetTickCount();
+    } else if (!g_holdingFront) {
+        // The holder came forward by itself - handed the front of a window
+        // that closed: it goes on to the window that should have it.
+        BringForward();
     }
 }
 
@@ -349,6 +368,7 @@ bool HoldFront() {
             WS_EX_TOOLWINDOW, L"STATIC", nullptr, WS_POPUP | WS_VISIBLE, -32000,
             -32000, 1, 1, nullptr, nullptr, nullptr, nullptr);
     }
+    g_holdingFront = true;
     for (int attempt = 0; attempt < kHoldAttempts; attempt++) {
         WaitHearingFront(kQuietFrontMs, FrontQuiet);
         if (GetForegroundWindow() == g_frontHolder) {
@@ -367,14 +387,16 @@ bool HoldFront() {
     return false;
 }
 
+enum class Target { kNone, kNowhere, kFound };
+
 // The desktop `steps` stops round from the current one, among those that have
 // windows on them (and the current one, which is where the counting starts).
-bool FindTarget(int steps, Desktops* desktops, int* target) {
+Target FindTarget(int steps, Desktops* desktops, int* target) {
     if (!ReadDesktops(desktops)) {
         // The shell may have been restarted under us: connect again.
         ReleaseDesktopManagers();
         if (!ConnectDesktopManagers() || !ReadDesktops(desktops)) {
-            return false;
+            return Target::kNone;
         }
     }
     std::vector<GUID> withWindows;
@@ -392,34 +414,64 @@ bool FindTarget(int steps, Desktops* desktops, int* target) {
             stops.push_back(i);
         }
     }
-    if (here < 0 || stops.size() < 2) {
-        return false;  // nowhere else to go
+    if (here < 0) {
+        return Target::kNone;
+    }
+    if (stops.size() < 2) {
+        return Target::kNowhere;
     }
     int count = (int)stops.size();
     *target = stops[((here + steps) % count + count) % count];
-    return *target != stops[here];
+    return *target != stops[here] ? Target::kFound : Target::kNone;
 }
+
+GUID CurrentDesktopId() {
+    using GetCurrent = HRESULT(STDMETHODCALLTYPE*)(void*, IUnknown**);
+    IUnknown* current = nullptr;
+    GUID id{};
+    if (SUCCEEDED(Slot<GetCurrent>(g_internalManager, kGetCurrentDesktopSlot)(
+            g_internalManager, &current)) &&
+        current) {
+        id = DesktopIdOf(current);
+        current->Release();
+    }
+    return id;
+}
+
+void ToggleTaskView();
 
 void StepDesktop(int steps) {
     if (ShellViewUp() || !ConnectDesktopManagers()) {
         return;
     }
-    // The front first, since that can take a moment, and the desktops after.
-    bool held = HoldFront();
-    if (!held) {
-        Wh_Log(L"Could not hold the front (%u)", GetLastError());
-    }
     Desktops desktops;
     int target = -1;
-    if (!FindTarget(steps, &desktops, &target)) {
-        if (held && !g_bringForwardPending) {
-            BringForward();  // nowhere to go, and the front goes back
-        }
+    Target found = FindTarget(steps, &desktops, &target);
+    if (found == Target::kNowhere) {
+        // No other desktop has windows: Win+Tab is what it is in Windows.
+        ToggleTaskView();
         return;
+    }
+    if (found != Target::kFound) {
+        return;
+    }
+    if (!HoldFront()) {
+        Wh_Log(L"Could not hold the front (%u)", GetLastError());
+    }
+    // Holding the front can take a moment. Should the desktop have changed
+    // meanwhile, the counting starts again from the one it is now.
+    Desktops again;
+    Desktops* from = &desktops;
+    if (CurrentDesktopId() != desktops.current) {
+        if (FindTarget(steps, &again, &target) != Target::kFound) {
+            BringForward();
+            return;
+        }
+        from = &again;
     }
     using Switch = HRESULT(STDMETHODCALLTYPE*)(void*, IUnknown*);
     HRESULT hr = Slot<Switch>(g_internalManager, kSwitchDesktopSlot)(
-        g_internalManager, desktops.objects[target]);
+        g_internalManager, from->objects[target]);
     if (FAILED(hr)) {
         Wh_Log(L"SwitchDesktop failed (0x%08X)", hr);
         ReleaseDesktopManagers();
@@ -580,4 +632,35 @@ bool HandleDesktopHotkey(const MSG* msg) {
         return false;
     }
     return PostThreadMessageW(threadId, kDesktopStepMessage, 1, 0) != FALSE;
+}
+
+// Called by the shell's keyboard thread for every key that goes down. While
+// the front is held, a key that is not part of a switch brings the window on
+// top of the desktop forward at once - before the key gets anywhere, so that it
+// goes to that window rather than to the holder.
+void BringDesktopForwardForKey(UINT vk) {
+    HWND holder = g_frontHolder;
+    if (!holder || GetForegroundWindow() != holder) {
+        return;
+    }
+    switch (vk) {
+        case VK_LWIN:
+        case VK_RWIN:
+        case VK_SHIFT:
+        case VK_LSHIFT:
+        case VK_RSHIFT:
+        case VK_CONTROL:
+        case VK_LCONTROL:
+        case VK_RCONTROL:
+        case VK_MENU:
+        case VK_LMENU:
+        case VK_RMENU:
+            return;  // held for a chord - the next switch, perhaps
+        case VK_TAB:
+            if (WinKeyDown()) {
+                return;  // the next switch itself
+            }
+            break;
+    }
+    BringTopWindowForward();
 }
