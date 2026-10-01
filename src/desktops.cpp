@@ -238,8 +238,8 @@ constexpr UINT_PTR kBringForwardTimer = 1;
 // before it has is undone by it. While the mod holds the front, it stays put.
 constexpr DWORD kQuietFrontMs = 200;
 // A window that has just lost the front to the holder can take it back - File
-// Explorer's and Chrome's do, at once - so the holder is watched this long
-// before a switch.
+// Explorer's do, at once, and not only theirs - so the holder is watched this
+// long before a switch.
 constexpr DWORD kHoldWatchMs = 50;
 constexpr int kHoldAttempts = 3;
 

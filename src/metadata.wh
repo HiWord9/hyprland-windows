@@ -237,7 +237,8 @@ the title bar.
       Win+Tab goes to the next virtual desktop that has windows on it, at once,
       and Win+Shift+Tab to the previous one - round and round, the way Alt+Tab
       goes round windows. Task View, which Win+Tab opens in Windows, is on
-      Win+Ctrl+Tab then. Off, Win+Tab is left alone.
+      Win+Ctrl+Tab then - and on Win+Tab still while no other desktop has
+      windows. Off, Win+Tab is left alone.
   $name: Virtual desktops
 */
 // ==/WindhawkModSettings==
