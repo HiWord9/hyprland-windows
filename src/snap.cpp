@@ -115,18 +115,21 @@ int SnappedEdge(int edge, const std::vector<int>& lines, int limit) {
 
 // Where an edge of ours may land: against a neighbour with the gap between
 // them, flush with the same edge of one, or at the edge of a work area. Only
-// neighbours that overlap us on the other axis count - a window far above is
-// not something this one is lining up with.
+// neighbours that overlap us on the other axis count, or sit right beside us
+// on it - a window far above is not something this one is lining up with,
+// but the one it has just been put next to is, top to top.
 void CollectLines(const SnapState& state,
                   const RECT& frame,
                   bool horizontal,
+                  int limit,
                   std::vector<int>* forLow,
                   std::vector<int>* forHigh) {
     int windowGap = g_settings.snapWindowGap;
     int monitorGap = g_settings.snapMonitorGap;
     SnapMode mode = g_settings.snap;
-    int acrossLow = horizontal ? frame.top : frame.left;
-    int acrossHigh = horizontal ? frame.bottom : frame.right;
+    int reach = windowGap + limit;
+    int acrossLow = (horizontal ? frame.top : frame.left) - reach;
+    int acrossHigh = (horizontal ? frame.bottom : frame.right) + reach;
 
     if (mode == SnapMode::Both || mode == SnapMode::Windows) {
         for (const RECT& other : state.windows) {
@@ -161,7 +164,7 @@ void SnapMovedFrame(const SnapState& state, int limit, RECT* frame) {
     for (int axis = 0; axis < 2; axis++) {
         bool horizontal = axis == 0;
         std::vector<int> forLow, forHigh;
-        CollectLines(state, *frame, horizontal, &forLow, &forHigh);
+        CollectLines(state, *frame, horizontal, limit, &forLow, &forHigh);
 
         int low = horizontal ? frame->left : frame->top;
         int high = horizontal ? frame->right : frame->bottom;
@@ -205,7 +208,7 @@ void SnapSizedFrame(const SnapState& state, UINT edge, int limit, RECT* frame) {
     for (int axis = 0; axis < 2; axis++) {
         bool horizontal = axis == 0;
         std::vector<int> forLow, forHigh;
-        CollectLines(state, *frame, horizontal, &forLow, &forHigh);
+        CollectLines(state, *frame, horizontal, limit, &forLow, &forHigh);
 
         bool lowMoves = horizontal ? EdgeMovesLeft(edge) : EdgeMovesTop(edge);
         bool highMoves =

@@ -2181,6 +2181,18 @@ static void TestSnapGeometry() {
     SnapMovedFrame(desktop, 12, &distant);
     CHECK(distant.right == 400, "and so is one that is simply too far away");
 
+    RECT beside{294, 206, 494, 406};  // put next to it, its top 6 lower
+    SnapMovedFrame(desktop, 12, &beside);
+    CHECK(beside.right == 500 && beside.top == 200,
+          "one put beside it lines up top to top (%ld,%ld)", beside.right,
+          beside.top);
+
+    RECT below{506, 606, 706, 806};  // under it, both edges a little off
+    SnapMovedFrame(desktop, 12, &below);
+    CHECK(below.left == 500 && below.top == 600,
+          "and one put under it, left to left (%ld,%ld)", below.left,
+          below.top);
+
     g_settings.snap = SnapMode::Monitor;
     RECT edge{6, 500, 206, 700};
     SnapMovedFrame(desktop, 12, &edge);
