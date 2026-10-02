@@ -205,15 +205,18 @@ BOOL CALLBACK CollectDesktopProc(HWND hwnd, LPARAM lParam) {
 // The little one that shows a desktop's name after every switch is a view
 // too, but one that never takes the focus, and it is not what this is about.
 // They are looked for by class: EnumWindows passes over them altogether.
+// Windows 10's are of a class of their own.
 bool ShellViewUp() {
     HWND foreground = GetForegroundWindow();
-    HWND view = nullptr;
-    while ((view = FindWindowExW(nullptr, view, L"XamlExplorerHostIslandWindow",
-                                 nullptr))) {
-        if (view == foreground ||
-            (IsWindowVisible(view) &&
-             !(GetWindowLongPtrW(view, GWL_EXSTYLE) & WS_EX_NOACTIVATE))) {
-            return true;
+    for (PCWSTR viewClass :
+         {L"XamlExplorerHostIslandWindow", L"MultitaskingViewFrame"}) {
+        HWND view = nullptr;
+        while ((view = FindWindowExW(nullptr, view, viewClass, nullptr))) {
+            if (view == foreground ||
+                (IsWindowVisible(view) &&
+                 !(GetWindowLongPtrW(view, GWL_EXSTYLE) & WS_EX_NOACTIVATE))) {
+                return true;
+            }
         }
     }
     return false;
@@ -251,15 +254,6 @@ constexpr int kTaskViewHotkey = 2;                    // Win+Ctrl+Tab
 std::mutex g_desktopThreadMutex;
 std::atomic<DWORD> g_desktopThreadId;
 constexpr DWORD kDesktopThreadStartWaitMs = 2000;
-
-// The shell's own Win+Tab, as it came by: the window it is posted to and its
-// hotkey ID. Win+Ctrl+Tab hands it back to that window, which opens Task View
-// quicker than anything else - and the hand-over is let through once, until
-// this time, rather than taken for the next desktop.
-std::atomic<HWND> g_shellWinTabWindow;
-std::atomic<WPARAM> g_shellWinTabId;
-std::atomic<DWORD> g_shellWinTabThroughUntil;
-constexpr DWORD kShellWinTabThroughMs = 1000;
 
 // Made and destroyed on the desktop thread, and looked at by the keyboard
 // thread as well.
@@ -425,20 +419,12 @@ Target FindTarget(int steps, Desktops* desktops, int* target) {
     return *target != stops[here] ? Target::kFound : Target::kNone;
 }
 
-GUID CurrentDesktopId() {
-    using GetCurrent = HRESULT(STDMETHODCALLTYPE*)(void*, IUnknown**);
-    IUnknown* current = nullptr;
-    GUID id{};
-    if (SUCCEEDED(Slot<GetCurrent>(g_internalManager, kGetCurrentDesktopSlot)(
-            g_internalManager, &current)) &&
-        current) {
-        id = DesktopIdOf(current);
-        current->Release();
-    }
-    return id;
+// Task View, opened - or closed, when it is up - the way its shortcut does it.
+void ToggleTaskView() {
+    ShellExecuteW(nullptr, L"open",
+                  L"shell:::{3080F90E-D7AD-11D9-BD98-0000947B0257}", nullptr,
+                  nullptr, SW_SHOWNORMAL);
 }
-
-void ToggleTaskView();
 
 void StepDesktop(int steps) {
     if (ShellViewUp() || !ConnectDesktopManagers()) {
@@ -458,20 +444,9 @@ void StepDesktop(int steps) {
     if (!HoldFront()) {
         Wh_Log(L"Could not hold the front (%u)", GetLastError());
     }
-    // Holding the front can take a moment. Should the desktop have changed
-    // meanwhile, the counting starts again from the one it is now.
-    Desktops again;
-    Desktops* from = &desktops;
-    if (CurrentDesktopId() != desktops.current) {
-        if (FindTarget(steps, &again, &target) != Target::kFound) {
-            BringForward();
-            return;
-        }
-        from = &again;
-    }
     using Switch = HRESULT(STDMETHODCALLTYPE*)(void*, IUnknown*);
     HRESULT hr = Slot<Switch>(g_internalManager, kSwitchDesktopSlot)(
-        g_internalManager, from->objects[target]);
+        g_internalManager, desktops.objects[target]);
     if (FAILED(hr)) {
         Wh_Log(L"SwitchDesktop failed (0x%08X)", hr);
         ReleaseDesktopManagers();
@@ -481,23 +456,6 @@ void StepDesktop(int steps) {
     g_switchedAt = GetTickCount();
     g_bringForwardPending = true;
     SetTimer(g_frontHolder, kBringForwardTimer, kBringForwardPollMs, nullptr);
-}
-
-// Task View, opened - or closed, when it is up - by the shell's own Win+Tab
-// once one has come by, and the way its shortcut does it before that.
-void ToggleTaskView() {
-    HWND shellWindow = g_shellWinTabWindow;
-    if (shellWindow && IsWindow(shellWindow)) {
-        g_shellWinTabThroughUntil = GetTickCount() + kShellWinTabThroughMs;
-        if (PostMessageW(shellWindow, WM_HOTKEY, g_shellWinTabId,
-                         MAKELPARAM(MOD_WIN, VK_TAB))) {
-            return;
-        }
-        g_shellWinTabThroughUntil = 0;
-    }
-    ShellExecuteW(nullptr, L"open",
-                  L"shell:::{3080F90E-D7AD-11D9-BD98-0000947B0257}", nullptr,
-                  nullptr, SW_SHOWNORMAL);
 }
 
 // The two hotkeys of the mod's own, held while Win+Tab is the mod's.
@@ -612,23 +570,28 @@ void ShutdownDesktopThread() {
     }
 }
 
+// Whether there is more than the one desktop. Asked of the registry, where
+// the shell keeps their IDs, rather than of the shell, which the thread asking
+// - one of the shell's own - must not wait on.
+bool SeveralDesktops() {
+    DWORD size = 0;
+    return RegGetValueW(HKEY_CURRENT_USER,
+                        L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer"
+                        L"\\VirtualDesktops",
+                        L"VirtualDesktopIDs", RRF_RT_REG_BINARY, nullptr, nullptr,
+                        &size) == ERROR_SUCCESS &&
+           size > sizeof(GUID);
+}
+
 // Called for every WM_HOTKEY a thread of this process retrieves: the shell's
-// Win+Tab, posted to one of its own, goes to the desktop thread instead.
+// Win+Tab, posted to one of its own, goes to the desktop thread instead - but
+// with only the one desktop it is left to the shell, as Task View.
 // Returns true if it was taken.
 bool HandleDesktopHotkey(const MSG* msg) {
     DWORD threadId = g_desktopThreadId;
     if (!threadId || LOWORD(msg->lParam) != MOD_WIN ||
-        HIWORD(msg->lParam) != VK_TAB) {
-        return false;
-    }
-    if (msg->hwnd) {
-        g_shellWinTabWindow = msg->hwnd;
-        g_shellWinTabId = msg->wParam;
-    }
-    DWORD throughUntil = g_shellWinTabThroughUntil.exchange(0);
-    if ((throughUntil && (int)(throughUntil - GetTickCount()) > 0) ||
-        !g_settings.desktopWinTab || g_desktopSwitchUnsupported ||
-        ShellViewUp()) {
+        HIWORD(msg->lParam) != VK_TAB || !g_settings.desktopWinTab ||
+        g_desktopSwitchUnsupported || ShellViewUp() || !SeveralDesktops()) {
         return false;
     }
     return PostThreadMessageW(threadId, kDesktopStepMessage, 1, 0) != FALSE;

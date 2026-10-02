@@ -17,6 +17,28 @@
 #include <cstring>
 #include <thread>
 
+// What the mod keeps to itself, asked of it by the tests.
+static bool IsBorderFading(HWND hwnd) {
+    std::lock_guard<std::mutex> lock(g_borderMutex);
+    return g_borderFades.count(hwnd) != 0;
+}
+
+static bool IsDragFading(HWND hwnd) {
+    std::lock_guard<std::mutex> lock(g_fadeMutex);
+    return g_fades.count(hwnd) != 0;
+}
+
+static bool IsDragSnapping(HWND hwnd) {
+    std::lock_guard<std::mutex> lock(g_snapMutex);
+    return g_snaps.count(hwnd) != 0;
+}
+
+// The last press on this thread, forgotten: the next one starts afresh.
+static void ForgetLastPress() {
+    g_lastPressTick = 0;
+    g_lastPressRoot = nullptr;
+}
+
 static int g_failures = 0;
 static int g_passes = 0;
 
@@ -1725,6 +1747,15 @@ static void TestDesktops(bool noInput) {
     // the shell's Win+Tab is handed to it the way the shell's thread does.
     StartDesktopThread();
     CHECK(g_desktopThreadId != 0, "the desktop thread is up");
+    // With only the one desktop, Win+Tab stays the shell's: Task View.
+    GUID ids[32]{};
+    DWORD idsSize = sizeof(ids);
+    RegGetValueW(HKEY_CURRENT_USER,
+                 L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VirtualDesktops",
+                 L"VirtualDesktopIDs", RRF_RT_REG_BINARY, nullptr, ids, &idsSize);
+    int desktopCount = (int)(idsSize / sizeof(GUID));
+    CHECK(SeveralDesktops() == (desktopCount > 1),
+          "the desktops are counted where the shell keeps them (%d)", desktopCount);
     MSG other = WinTabHotkey(MOD_WIN | MOD_SHIFT);
     CHECK(!HandleDesktopHotkey(&other), "a hotkey other than Win+Tab is left alone");
 
@@ -1920,14 +1951,7 @@ static void TestDesktops(bool noInput) {
                                 nullptr, nullptr, viewClass.hInstance, nullptr);
     Pump(100);
     CHECK(ShellViewUp(), "a shell view is seen to be up");
-    // The shell's Win+Tab comes to a window of its own, which one of the
-    // harness's stands in for.
-    HWND shellWindow = CreateWindowExW(0, L"STATIC", L"Hypr shell", WS_POPUP, 0,
-                                       0, 1, 1, nullptr, nullptr,
-                                       GetModuleHandleW(nullptr), nullptr);
-    MSG fromShell = winTab;
-    fromShell.hwnd = shellWindow;
-    CHECK(!HandleDesktopHotkey(&fromShell), "and Win+Tab is left to the shell");
+    CHECK(!HandleDesktopHotkey(&winTab), "and Win+Tab is left to the shell");
     GUID before = RegistryCurrentDesktop();
     PostThreadMessageW(g_desktopThreadId, WM_APP + 2, 1, 0);
     CHECK(!WaitForDesktop(true, before, 800),
@@ -1936,25 +1960,6 @@ static void TestDesktops(bool noInput) {
     UnregisterClassW(L"XamlExplorerHostIslandWindow", viewClass.hInstance);
     Pump(100);
     CHECK(!ShellViewUp(), "and once it has gone, the desktops are free again");
-
-    // Having come by, the shell's Win+Tab is what Win+Ctrl+Tab hands back to
-    // its window for Task View - let through by the mod that one time.
-    ToggleTaskView();
-    MSG handedBack{};
-    bool got = false;
-    for (int i = 0; i < 50 && !got; i++) {
-        got = PeekMessageW(&handedBack, shellWindow, WM_HOTKEY, WM_HOTKEY,
-                           PM_REMOVE);
-        Sleep(10);
-    }
-    CHECK(got && handedBack.wParam == winTab.wParam &&
-              handedBack.lParam == winTab.lParam,
-          "Task View goes by the shell's own Win+Tab, handed back to its window");
-    CHECK(got && !HandleDesktopHotkey(&handedBack),
-          "which the mod lets through to it");
-    CHECK(g_shellWinTabThroughUntil == 0, "that one time only");
-    DestroyWindow(shellWindow);
-    g_shellWinTabWindow = nullptr;
 
     // The real Task View, opened through the shell: its windows are not
     // listed where the harness's own are, and it is in front a moment before

@@ -208,8 +208,3 @@ bool IsDoubleClickAt(HWND root, POINT pt, DWORD tick) {
     g_lastPressTick = together ? 0 : tick;
     return together;
 }
-
-void ForgetLastPress() {
-    g_lastPressTick = 0;
-    g_lastPressRoot = nullptr;
-}

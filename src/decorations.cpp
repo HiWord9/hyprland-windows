@@ -153,11 +153,6 @@ constexpr DWORD kBorderStepMs = 16;    // ~60 Hz
 constexpr int kBorderFinishWaitMs = 300;
 constexpr int kBorderWriteWaitMs = 20;
 
-bool IsBorderFading(HWND hwnd) {
-    std::lock_guard<std::mutex> lock(g_borderMutex);
-    return g_borderFades.count(hwnd) != 0;
-}
-
 // Stops the fade and waits for any color already on its way to the window, so
 // that whatever the caller writes next is what stays on it.
 void CancelBorderFade(HWND hwnd) {

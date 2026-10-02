@@ -39,11 +39,6 @@ struct DragFadeWork {
 constexpr DWORD kFadeStepMs = 8;       // ~120 Hz, about as fine as Sleep gets
 constexpr DWORD kFadeHoldStepMs = 16;  // while waiting for the drag to end
 
-bool IsDragFading(HWND hwnd) {
-    std::lock_guard<std::mutex> lock(g_fadeMutex);
-    return g_fades.count(hwnd) != 0;
-}
-
 // The alpha a window is dragged at. Relative to what it had, so a window that
 // was already translucent keeps that much of a head start.
 BYTE DragAlphaFor(BYTE baseAlpha, int opacityPercent) {

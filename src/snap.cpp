@@ -470,11 +470,6 @@ std::vector<HWND> SnapshotSnappedWindows() {
     return result;
 }
 
-bool IsDragSnapping(HWND hwnd) {
-    std::lock_guard<std::mutex> lock(g_snapMutex);
-    return g_snaps.count(hwnd) != 0;
-}
-
 // Called from the drag request, on the window's own thread, once a move or
 // size loop is about to start.
 void BeginDragSnap(HWND root, WPARAM kind, POINT pt) {

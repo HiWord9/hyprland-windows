@@ -202,7 +202,6 @@ void ForgetBorderColor(HWND hwnd);
 void OnWindowActivation(HWND hwnd, bool active);
 // The border color on a focus change, faded across instead of switched.
 void AnimateBorderColor(HWND hwnd, bool active);
-bool IsBorderFading(HWND hwnd);
 void CancelBorderFade(HWND hwnd);
 void FinishBorderFades();
 void ApplyCorners(HWND hwnd);
@@ -332,7 +331,6 @@ int DoubleClickTimeMs();
 // Whether this press and the one before it on this thread are a double click.
 // Takes the tick instead of reading the clock, so the rules are testable.
 bool IsDoubleClickAt(HWND root, POINT pt, DWORD tick);
-void ForgetLastPress();
 void DoWindowAction(HWND hwnd, WindowAction action);
 void RequestWindowAction(HWND root, WindowAction action);
 
@@ -344,13 +342,11 @@ bool SnapAllowedWith(bool modifierDown);
 bool SnapAllowed();
 void BeginDragSnap(HWND root, WPARAM kind, POINT pt);
 void EndDragSnap(HWND hwnd);
-bool IsDragSnapping(HWND hwnd);
 std::vector<HWND> SnapshotSnappedWindows();
 
 ////////////////////////////////////////////////////////////////////////////////
 // Translucency while dragging
 
-bool IsDragFading(HWND hwnd);
 BYTE DragAlphaFor(BYTE baseAlpha, int opacityPercent);
 BYTE FadeAlphaAt(BYTE from, BYTE to, int durationMs, int elapsedMs);
 void BeginDragFade(HWND root, WPARAM kind);
