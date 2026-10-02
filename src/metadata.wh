@@ -1,7 +1,7 @@
 // ==WindhawkMod==
 // @id              hyprland-windows
 // @name            Hyprland Windows
-// @description     Hyprland-style window handling: move, resize, maximize and close windows with Win + mouse from anywhere on them, hide title bars, and color window borders
+// @description     Hyprland-style window handling: move, resize, maximize and close windows with Win + mouse from anywhere on them, hide title bars, color window borders, and go round the virtual desktops with Win+Tab
 // @version         1.0.1
 // @author          hiword9
 // @github          https://github.com/HiWord9
@@ -63,6 +63,10 @@ the title bar.
 * `Win` + mouse doesn't work over content drawn with WinUI or XAML - Paint,
   Windows Terminal, the tabs and address bar of File Explorer: Windows hands
   those clicks to the app past the point where the mod sees them.
+* Win+Tab switches desktops through a part of Windows that Microsoft doesn't
+  publish. It is known for Windows 10 and for Windows 11 from 22H2 on; on a
+  build the mod doesn't recognize, and with only the one desktop, Win+Tab stays
+  Task View.
 */
 // ==/WindhawkModReadme==
 

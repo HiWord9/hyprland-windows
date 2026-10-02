@@ -58,6 +58,10 @@ the title bar.
 * `Win` + mouse doesn't work over content drawn with WinUI or XAML — Paint,
   Windows Terminal, the tabs and address bar of File Explorer: Windows hands
   those clicks to the app past the point where the mod sees them.
+* Win+Tab switches desktops through a part of Windows that Microsoft doesn't
+  publish. It is known for Windows 10 and for Windows 11 from 22H2 on; on a
+  build the mod doesn't recognize, and with only the one desktop, Win+Tab stays
+  Task View.
 
 ## Working on the source
 
@@ -102,6 +106,7 @@ Windhawk installed for its bundled clang:
 .\build.ps1 -Bundle    # only build\hyprland-windows.wh.cpp
 .\build.ps1 -Harness   # bundle + test\harness.exe
 .\build.ps1 -Check     # syntax-check every src\*.cpp on its own
+.\build.ps1 -Shell     # bundle + test\desktops_in_shell.exe/.dll
 ```
 
 The mod itself is never compiled here: Windhawk compiles the `.wh.cpp` on the
@@ -117,6 +122,20 @@ input.
 .\test\harness.exe                 # everything (moves the mouse for a few seconds)
 .\test\harness.exe --no-input      # skip the mouse-input tests
 .\test\harness.exe --dpi-unaware   # run as a DPI-unaware process
+.\test\harness.exe --desktops      # only the Win+Tab tests
+```
+
+What Win+Tab does is decided by the shell as much as by the mod, and a
+harness is not the shell. `test\desktops_in_shell.exe` loads the bundled mod
+into Explorer itself and presses the keys, counting how the desktops change —
+or, with `--mod`, presses them for the copy Windhawk has compiled. It switches
+the desktops of whoever runs it; run it elevated for the keys to reach elevated
+windows as well.
+
+```powershell
+.\test\desktops_in_shell.exe burst 12 110   # Tab again and again, Win held
+.\test\desktops_in_shell.exe taps 10 400    # Win+Tab again and again
+.\test\desktops_in_shell.exe type 6         # keys typed right after a switch
 ```
 
 The other `test\*_probe.cpp` files are standalone experiments that document
