@@ -116,16 +116,7 @@ static std::string Front() {
     return std::string(cls) + (cloaked ? " (on another desktop)" : "");
 }
 
-// An elevated window in front - Windhawk's own, for one - takes no keys from
-// this program, and the mod brings one forward like any other when it is on
-// top of a desktop. Whatever the keys were to do after that, did not happen.
-static bool ElevatedInFront() {
-    DWORD pid = 0;
-    GetWindowThreadProcessId(GetForegroundWindow(), &pid);
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!process) {
-        return false;
-    }
+static bool Elevated(HANDLE process) {
     bool elevated = true;  // a process whose token is not to be looked at
     HANDLE token = nullptr;
     if (OpenProcessToken(process, TOKEN_QUERY, &token)) {
@@ -136,6 +127,24 @@ static bool ElevatedInFront() {
                    elevation.TokenIsElevated;
         CloseHandle(token);
     }
+    return elevated;
+}
+
+// An elevated window in front - Windhawk's own, for one - takes no keys from
+// this program unless it is elevated too, and the mod brings one forward like
+// any other when it is on top of a desktop. Whatever the keys were to do
+// after that, did not happen.
+static bool ElevatedInFront() {
+    if (Elevated(GetCurrentProcess())) {
+        return false;
+    }
+    DWORD pid = 0;
+    GetWindowThreadProcessId(GetForegroundWindow(), &pid);
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process) {
+        return false;
+    }
+    bool elevated = Elevated(process);
     CloseHandle(process);
     return elevated;
 }
