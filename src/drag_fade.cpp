@@ -114,16 +114,41 @@ void RunDragFade(DragFadeWork& work) {
     FadeOver(work, alpha, work.fade.baseAlpha,
              g_uninitializing ? 0 : work.fadeOut, false);
 
-    // Only the window's own thread may take WS_EX_LAYERED back off. When the
-    // request cannot be handed over - the window is gone, or the mod is being
-    // unloaded and the hook that would pick it up is not there any more - the
-    // window keeps a layered style at full opacity, which nothing can see and
-    // which goes away with the window.
+    // Only the window's own thread may take WS_EX_LAYERED back off. During the
+    // unload the teardown asks it to (UnfadeDraggedWindows), and the window's
+    // entry stays for that. Otherwise, when the request cannot be handed over,
+    // the window keeps a layered style at full opacity, which nothing can see.
     bool handed = !g_uninitializing && IsWindow(work.root) &&
                   PostMessageW(work.root, g_msgDrag, kDragUnfade, 0);
-    if (!handed) {
+    if (!handed && (!g_uninitializing || !IsWindow(work.root))) {
         std::lock_guard<std::mutex> lock(g_fadeMutex);
         g_fades.erase(work.root);
+    }
+}
+
+// The windows being dragged when the mod unloads have WS_EX_LAYERED of ours
+// on them, which only their own threads may take off. Asked here through the
+// request their message hook picks up, before that hook goes, and waited for
+// a little: a thread that does not answer leaves its window layered.
+void UnfadeDraggedWindows() {
+    std::vector<HWND> windows;
+    {
+        std::lock_guard<std::mutex> lock(g_fadeMutex);
+        for (const auto& [hwnd, fade] : g_fades) {
+            windows.push_back(hwnd);
+        }
+    }
+    for (HWND hwnd : windows) {
+        PostMessageW(hwnd, g_msgDrag, kDragUnfade, 0);
+    }
+    for (int waited = 0; !windows.empty() && waited < 2000; waited += 20) {
+        {
+            std::lock_guard<std::mutex> lock(g_fadeMutex);
+            if (g_fades.empty()) {
+                return;
+            }
+        }
+        Sleep(20);
     }
 }
 

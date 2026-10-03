@@ -363,6 +363,7 @@ BYTE DragAlphaFor(BYTE baseAlpha, int opacityPercent);
 BYTE FadeAlphaAt(BYTE from, BYTE to, int durationMs, int elapsedMs);
 void BeginDragFade(HWND root, WPARAM kind);
 void EndDragFade(HWND hwnd);
+void UnfadeDraggedWindows();
 
 ////////////////////////////////////////////////////////////////////////////////
 // The hooked APIs

@@ -137,6 +137,10 @@ void Wh_ModBeforeUninit() {
     // window behind the teardown's back.
     g_uninitializing = true;
 
+    // A window being dragged is put back while the hook that does it is
+    // still there.
+    UnfadeDraggedWindows();
+
     // Take our hook procedures out before the DLL goes away.
     RemoveMessageHooks();
     ShutdownKeyboardServer();

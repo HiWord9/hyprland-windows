@@ -124,9 +124,16 @@ LRESULT CALLBACK GetMessageProc(int code, WPARAM wParam, LPARAM lParam) {
     // include the PM_QS_* filter bits, so it is a bitwise test. PM_NOREMOVE
     // means the app is only looking at the message; it stays in the queue and
     // we must not consume it.
-    if (code == HC_ACTION && (wParam & PM_REMOVE) && lParam &&
-        !g_uninitializing) {
-        ProcessRetrievedMessage(reinterpret_cast<MSG*>(lParam));
+    if (code == HC_ACTION && (wParam & PM_REMOVE) && lParam) {
+        auto* msg = reinterpret_cast<MSG*>(lParam);
+        if (!g_uninitializing) {
+            ProcessRetrievedMessage(msg);
+        } else if (msg->message == g_msgDrag && msg->wParam == kDragUnfade) {
+            // The one request still taken during the teardown, which makes
+            // it itself: a dragged window put back the way it was.
+            EndDragFade(msg->hwnd);
+            msg->message = WM_NULL;
+        }
     }
     return CallNextHookEx(nullptr, code, wParam, lParam);
 }

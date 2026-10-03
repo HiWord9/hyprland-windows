@@ -2645,6 +2645,61 @@ static void TestDragFade() {
     Pump(100);
 }
 
+// A drag still going when the mod unloads. The window is on a thread of its
+// own with the real message hook on it, since the teardown waits for that
+// thread to put the window back, and the button is held for real, since that
+// is what keeps the fade going.
+static void TestDragFadeAtUnload() {
+    printf("\n== drag translucency at unload ==\n");
+
+    HWND dragged = nullptr;
+    HANDLE created = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    HANDLE pressed = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    HANDLE fading = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    std::atomic<bool> stop{false};
+    std::thread owner([&] {
+        dragged = CreateTestWindow(L"Hypr fade at unload", false, 360, 360);
+        SetEvent(created);
+        WaitForSingleObject(pressed, 5000);
+        BeginDragFade(dragged, kDragMove);
+        SetEvent(fading);
+        while (!stop) {
+            PumpRaw(20);
+        }
+        DestroyWindow(dragged);
+        PumpRaw(50);
+    });
+    WaitForSingleObject(created, 5000);
+    InstallMessageHooks();
+
+    RECT wr{};
+    GetWindowRect(dragged, &wr);
+    SetCursorPos((wr.left + wr.right) / 2, (wr.top + wr.bottom) / 2);
+    Sleep(50);
+    SendMouse(MOUSEEVENTF_LEFTDOWN);
+    SetEvent(pressed);
+    WaitForSingleObject(fading, 5000);
+    Sleep(300);
+    CHECK(IsDragFading(dragged) &&
+              (GetWindowLongPtrW(dragged, GWL_EXSTYLE) & WS_EX_LAYERED),
+          "a window being dragged when the mod unloads is layered");
+
+    Wh_ModBeforeUninit();
+    bool styleBack = !(GetWindowLongPtrW(dragged, GWL_EXSTYLE) & WS_EX_LAYERED);
+    bool untracked = !IsDragFading(dragged);
+    SendMouse(MOUSEEVENTF_LEFTUP);
+    // Uninit is one-way for the mod, but the harness carries on afterwards.
+    g_uninitializing = false;
+    CHECK(styleBack && untracked,
+          "and its own thread takes the style back off before the hook goes");
+
+    stop = true;
+    owner.join();
+    CloseHandle(created);
+    CloseHandle(pressed);
+    CloseHandle(fading);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 int main(int argc, char** argv) {
@@ -2700,6 +2755,7 @@ int main(int argc, char** argv) {
     TestDragFade();
     if (!noInput) {
         TestMoveResize();
+        TestDragFadeAtUnload();
     }
 
     printf("\n%d passed, %d failed\n", g_passes, g_failures);
