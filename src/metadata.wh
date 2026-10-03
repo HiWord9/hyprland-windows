@@ -69,6 +69,18 @@ the title bar.
   publish. It is known for Windows 10 and for Windows 11 from 22H2 on; on a
   build the mod doesn't recognize, and with only the one desktop, Win+Tab stays
   Task View.
+* The hotkey, and a window shortcut that is a key, are taken everywhere: a
+  program that uses the same keys for something of its own doesn't get them
+  while the mod is on. Pick other keys in the settings if one does.
+
+## Conflicts
+
+* [AltDrag](https://windhawk.net/mods/alt-drag) moves and resizes windows with
+  a key and the mouse as well, and
+  [Slick Window Arrangement](https://windhawk.net/mods/slick-window-arrangement)
+  snaps windows while they are dragged. Running either of them alongside this
+  mod, two mods act on the same drag: use one of them at a time - or, with
+  Slick Window Arrangement, turn this mod's magnetic edges off.
 */
 // ==/WindhawkModReadme==
 
