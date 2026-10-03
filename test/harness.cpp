@@ -1710,6 +1710,18 @@ static bool WaitForFront(bool held, DWORD ms) {
     return false;
 }
 
+// A window of the current desktop in front, whoever's holder had it before.
+static bool WaitForWindowInFront(DWORD ms) {
+    DWORD end = GetTickCount() + ms;
+    while ((int)(end - GetTickCount()) > 0) {
+        if (WindowOnCurrentDesktopInFront()) {
+            return true;
+        }
+        Sleep(10);
+    }
+    return false;
+}
+
 // An elevated window in front - Windhawk's own, for one - takes no keys from
 // the harness: Windows keeps input sent from below away from it. The mod brings
 // one forward like any other when it is on top of a desktop.
@@ -1832,8 +1844,10 @@ static void TestDesktops(bool noInput) {
             SendMarkedKey(VK_SHIFT, true);
             SendMarkedKey(VK_LWIN, true);
             checkKeys(switched, "Win+Shift+Tab goes the other way");
-            bool broughtForward =
-                WaitForFront(false, 1500) && WindowOnCurrentDesktopInFront();
+            // Whichever copy of the mod made the switch - this one, or the one
+            // in the shell when it holds the hotkey - brings the window
+            // forward within a second.
+            bool broughtForward = WaitForWindowInFront(1500);
             CHECK(broughtForward,
                   "and the window on top of that desktop brought forward once "
                   "it is up (%s)", ForegroundClass().c_str());
