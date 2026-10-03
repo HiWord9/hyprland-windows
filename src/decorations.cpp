@@ -315,20 +315,13 @@ void AnimateBorderColor(HWND hwnd, bool active) {
         g_borderThreadRunning = true;
     }
 
-    g_modRefCount++;
-    HANDLE thread =
-        CreateThread(nullptr, 0, BorderFadeThread, nullptr, 0, nullptr);
-    if (!thread) {
-        Wh_Log(L"CreateThread failed (%u)", GetLastError());
-        g_modRefCount--;
+    if (!StartModThread(BorderFadeThread, nullptr)) {
         {
             std::lock_guard<std::mutex> lock(g_borderMutex);
             g_borderThreadRunning = false;
         }
         ApplyBorderColor(hwnd, active);
-        return;
     }
-    CloseHandle(thread);
 }
 
 // The teardown waits here, with g_uninitializing already set, before the

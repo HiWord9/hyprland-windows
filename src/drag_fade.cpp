@@ -199,16 +199,10 @@ void BeginDragFade(HWND root, WPARAM kind) {
         SetLayeredWindowAttributes(root, 0, fade.baseAlpha, LWA_ALPHA);
     }
 
-    g_modRefCount++;
-    HANDLE thread = CreateThread(nullptr, 0, DragFadeThread, work, 0, nullptr);
-    if (!thread) {
-        Wh_Log(L"CreateThread failed (%u)", GetLastError());
-        g_modRefCount--;
+    if (!StartModThread(DragFadeThread, work)) {
         delete work;
         EndDragFade(root);  // on the window's own thread, so undo it here
-        return;
     }
-    CloseHandle(thread);
 }
 
 // The window's thread is asked to take the mod's WS_EX_LAYERED back off, the

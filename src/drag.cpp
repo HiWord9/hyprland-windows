@@ -200,16 +200,10 @@ bool StartResizeRelease(HWND root) {
     auto* release = new ResizeRelease{root,
                                       GetWindowThreadProcessId(root, nullptr),
                                       PhysicalButtonVk(true)};
-    g_modRefCount++;
-    HANDLE thread =
-        CreateThread(nullptr, 0, ResizeReleaseThread, release, 0, nullptr);
-    if (!thread) {
-        Wh_Log(L"CreateThread failed (%u)", GetLastError());
-        g_modRefCount--;
+    if (!StartModThread(ResizeReleaseThread, release)) {
         delete release;
         return false;
     }
-    CloseHandle(thread);
     return true;
 }
 

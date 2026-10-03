@@ -542,18 +542,12 @@ void StartDesktopThread() {
     if (!ready) {
         return;
     }
-    g_modRefCount++;
     DWORD threadId = 0;
-    HANDLE thread = CreateThread(nullptr, 0, DesktopThread, ready, 0, &threadId);
-    if (thread) {
-        CloseHandle(thread);
+    if (StartModThread(DesktopThread, ready, &threadId)) {
         // Published once the thread has its queue: a step posted before that
         // would be lost.
         WaitForSingleObject(ready, kDesktopThreadStartWaitMs);
         g_desktopThreadId = threadId;
-    } else {
-        Wh_Log(L"CreateThread failed (%u)", GetLastError());
-        g_modRefCount--;
     }
     CloseHandle(ready);
 }

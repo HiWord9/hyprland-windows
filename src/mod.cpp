@@ -4,6 +4,49 @@
 std::atomic<bool> g_uninitializing;
 std::atomic<int> g_modRefCount;
 
+// Every thread of the mod is started here, and its handle kept for
+// Wh_ModUninit to wait on. The reference count alone is not enough: dropping
+// its reference is the last thing a thread does, but it still has the rest
+// of its function to return through, in the image.
+std::mutex g_threadsMutex;
+std::vector<HANDLE> g_threads;
+
+bool StartModThread(LPTHREAD_START_ROUTINE proc, void* param, DWORD* threadId) {
+    g_modRefCount++;  // the thread's own, dropped as it ends
+    HANDLE thread = CreateThread(nullptr, 0, proc, param, 0, threadId);
+    if (!thread) {
+        Wh_Log(L"CreateThread failed (%u)", GetLastError());
+        g_modRefCount--;
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(g_threadsMutex);
+    // The ones that are done go, or a long session piles up a handle a drag.
+    g_threads.erase(std::remove_if(g_threads.begin(), g_threads.end(),
+                                   [](HANDLE h) {
+                                       if (WaitForSingleObject(h, 0) !=
+                                           WAIT_OBJECT_0) {
+                                           return false;
+                                       }
+                                       CloseHandle(h);
+                                       return true;
+                                   }),
+                    g_threads.end());
+    g_threads.push_back(thread);
+    return true;
+}
+
+void JoinModThreads() {
+    std::vector<HANDLE> threads;
+    {
+        std::lock_guard<std::mutex> lock(g_threadsMutex);
+        threads.swap(g_threads);
+    }
+    for (HANDLE thread : threads) {
+        WaitForSingleObject(thread, INFINITE);
+        CloseHandle(thread);
+    }
+}
+
 BOOL Wh_ModInit() {
     Wh_Log(L"Init");
 
@@ -107,6 +150,7 @@ void Wh_ModUninit() {
     while (g_modRefCount > 0) {
         Sleep(100);
     }
+    JoinModThreads();
 }
 
 void Wh_ModSettingsChanged() {

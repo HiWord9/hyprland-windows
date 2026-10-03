@@ -44,6 +44,12 @@ struct ModRef {
     ModRef& operator=(const ModRef&) = delete;
 };
 
+// Starts a worker thread that holds a reference, which the thread drops as
+// it ends, and keeps its handle for Wh_ModUninit to wait on.
+bool StartModThread(LPTHREAD_START_ROUTINE proc,
+                    void* param,
+                    DWORD* threadId = nullptr);
+
 ////////////////////////////////////////////////////////////////////////////////
 // Animation
 

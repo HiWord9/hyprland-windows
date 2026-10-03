@@ -282,16 +282,10 @@ HWND StartServer() {
     if (!ready) {
         return nullptr;
     }
-    g_modRefCount++;
-    HANDLE thread = CreateThread(nullptr, 0, KeyboardServerThread, ready, 0,
-                                 &g_serverThreadId);
-    if (!thread) {
-        Wh_Log(L"CreateThread failed (%u)", GetLastError());
-        g_modRefCount--;
+    if (!StartModThread(KeyboardServerThread, ready, &g_serverThreadId)) {
         CloseHandle(ready);
         return nullptr;
     }
-    CloseHandle(thread);
     // The thread takes the lock to publish its window, so it is let go of
     // while waiting.
     lock.unlock();
