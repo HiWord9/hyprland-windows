@@ -56,6 +56,14 @@ int PhysicalButtonVk(bool right) {
 // user is holding the right one - and for a move it isn't either when another
 // thread retrieved the press. Without this the loop starts in its keyboard
 // mode instead, where it waits for the arrow keys and ignores the mouse.
+//
+// Nothing lets the button go again in that state afterwards: the release that
+// ends a resize is posted, and a posted message does not update it. So the
+// thread remembers, and the first message it retrieves after the loop puts
+// the button back the way the mouse has it - or GetKeyState would go on
+// saying it is down until the next real click.
+thread_local bool g_leftButtonForced;
+
 void ForceLeftButtonDown() {
     if (GetKeyState(VK_LBUTTON) < 0) {
         return;
@@ -63,6 +71,22 @@ void ForceLeftButtonDown() {
     BYTE keyState[256];
     if (GetKeyboardState(keyState)) {
         keyState[VK_LBUTTON] |= 0x80;
+        SetKeyboardState(keyState);
+        g_leftButtonForced = true;
+    }
+}
+
+void ReleaseForcedLeftButton() {
+    if (!g_leftButtonForced || IsInMoveSizeLoop()) {
+        return;
+    }
+    g_leftButtonForced = false;
+    if (GetAsyncKeyState(PhysicalButtonVk(false)) & 0x8000) {
+        return;  // held for real by now
+    }
+    BYTE keyState[256];
+    if (GetKeyboardState(keyState)) {
+        keyState[VK_LBUTTON] &= ~0x80;
         SetKeyboardState(keyState);
     }
 }

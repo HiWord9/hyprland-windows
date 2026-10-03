@@ -322,6 +322,8 @@ void RequestDrag(HWND root, WPARAM kind, POINT pt);
 // Per-thread: a button-up to swallow because we swallowed its button-down.
 extern thread_local bool g_swallowButtonUp[2];  // [0] = left, [1] = right
 bool HandleDragRequest(MSG* msg);
+// After a drag: the left button the loop needed held, let go again.
+void ReleaseForcedLeftButton();
 bool HandleModifierButtonDown(const MSG* msg, bool right);
 bool HandleButtonUp(bool right);
 bool HandleLeftButtonUp();

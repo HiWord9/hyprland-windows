@@ -1061,6 +1061,12 @@ static void TestMoveResize() {
     CHECK(cur.x == p.x + 100 && cur.y == p.y + 70,
           "cursor was not warped to the corner (%ld,%ld vs %ld,%ld)", cur.x,
           cur.y, p.x + 100, p.y + 70);
+    // The loop needed the left button down in this thread's key state; the
+    // next message retrieved after it puts the button back.
+    MSG next{hwnd, WM_NULL};
+    ProcessRetrievedMessage(&next);
+    CHECK(GetKeyState(VK_LBUTTON) >= 0,
+          "and the left button the resize needed is let go once it is over");
 
     // Resize from the top-left quadrant.
     RECT r2 = r1;

@@ -14,6 +14,8 @@
 // Called for every message an application removes from its queue. Returns
 // with the message replaced by WM_NULL if it was consumed by the mod.
 void ProcessRetrievedMessage(MSG* msg) {
+    ReleaseForcedLeftButton();
+
     bool consumed = false;
 
     switch (msg->message) {
