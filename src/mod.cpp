@@ -47,6 +47,25 @@ void JoinModThreads() {
     }
 }
 
+// Has the window's own thread carry out a teardown request, and waits for it.
+// A subclass procedure left behind in an unmapped image crashes its
+// application the next time the window gets a message, so a window that does
+// not answer is tried again, and then waited for: hanging the unload is bad,
+// crashing the app is worse.
+void SendTeardown(HWND hwnd, UINT message, WPARAM wParam) {
+    for (int attempt = 0; attempt < 3; attempt++) {
+        DWORD_PTR result;
+        if (SendMessageTimeoutW(hwnd, message, wParam, 0,
+                                SMTO_ABORTIFHUNG | SMTO_BLOCK, 2000, &result)) {
+            return;
+        }
+    }
+    if (IsWindow(hwnd)) {
+        Wh_Log(L"Waiting for %p to answer (%u)", hwnd, GetLastError());
+        SendMessageW(hwnd, message, wParam, 0);
+    }
+}
+
 BOOL Wh_ModInit() {
     Wh_Log(L"Init");
 
@@ -109,32 +128,14 @@ void Wh_ModBeforeUninit() {
     FinishBorderFades();
     RestoreAllBorderColors();
 
-    // A drag in progress has a subclass of ours on its window as well, and
-    // the same rule applies to it: it has to come off on the window's own
-    // thread, which is where this sent message is answered.
+    // A drag has a subclass of ours on its window, and one whose loop never
+    // ended keeps it. Like the title bars below, it comes off on the window's
+    // own thread.
     for (HWND hwnd : SnapshotSnappedWindows()) {
-        DWORD_PTR result;
-        SendMessageTimeoutW(hwnd, g_msgDrag, kDragUnsnap, 0,
-                            SMTO_ABORTIFHUNG | SMTO_BLOCK, 2000, &result);
+        SendTeardown(hwnd, g_msgDrag, kDragUnsnap);
     }
-
-    // Restore synchronously on each window's thread, so that no subclass
-    // procedure is left behind once the DLL is gone. A subclass procedure in
-    // an unmapped image crashes its application the next time the window gets
-    // a message, so a window that does not answer is tried again, and then
-    // waited for: hanging the unload is bad, crashing the app is worse.
     for (HWND hwnd : SnapshotFramelessWindows()) {
-        bool restored = false;
-        for (int attempt = 0; attempt < 3 && !restored; attempt++) {
-            DWORD_PTR result;
-            restored = SendMessageTimeoutW(hwnd, g_msgFrameless, kActionShow, 0,
-                                           SMTO_ABORTIFHUNG | SMTO_BLOCK, 2000,
-                                           &result) != 0;
-        }
-        if (!restored && IsWindow(hwnd)) {
-            Wh_Log(L"Waiting for %p to restore (%u)", hwnd, GetLastError());
-            SendMessageW(hwnd, g_msgFrameless, kActionShow, 0);
-        }
+        SendTeardown(hwnd, g_msgFrameless, kActionShow);
     }
 }
 
