@@ -319,8 +319,24 @@ HWND FindKeyboardServer() {
     return any;
 }
 
+// The shell's own Explorer. With folder windows in a separate process, other
+// copies of explorer.exe run them, and those must not take the shell's part: a
+// second permanent keyboard hook, and hotkeys only the shell gets. The shell's
+// copy is the one that owns the shell window, or the one starting up before
+// there is any, as after an Explorer restart. Decided once, because that
+// window comes and goes with the shell.
 bool IsShellProcess() {
-    return _wcsicmp(ThisProgramName().c_str(), L"explorer.exe") == 0;
+    static const bool shell = [] {
+        if (_wcsicmp(ThisProgramName().c_str(), L"explorer.exe") != 0) {
+            return false;
+        }
+        HWND shellWindow = GetShellWindow();
+        DWORD owner = 0;
+        return !shellWindow ||
+               (GetWindowThreadProcessId(shellWindow, &owner) &&
+                owner == GetCurrentProcessId());
+    }();
+    return shell;
 }
 
 BOOL CALLBACK FindOwnWindowProc(HWND hwnd, LPARAM lParam) {
