@@ -206,6 +206,11 @@ HINSTANCE ThisModule() {
 }
 
 DWORD WINAPI KeyboardServerThread(LPVOID param) {
+    // The queue first. The shutdown posts WM_QUIT here, and a post to a thread
+    // that has no queue yet is lost: the loop below would wait for good.
+    MSG msg;
+    PeekMessageW(&msg, nullptr, 0, 0, PM_NOREMOVE);
+
     HANDLE ready = param;
     // Registered against this image rather than the process: two copies of
     // the mod can be loaded side by side while one replaces the other, and a
@@ -242,8 +247,9 @@ DWORD WINAPI KeyboardServerThread(LPVOID param) {
                 OnForegroundChanged, 0, 0, WINEVENT_OUTOFCONTEXT);
             FollowForeground(GetForegroundWindow());
         }
-        MSG msg;
-        while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+        // A shutdown from before the queue was there is seen here instead: it
+        // sets the flag before it posts.
+        while (!g_uninitializing && GetMessageW(&msg, nullptr, 0, 0) > 0) {
             DispatchMessageW(&msg);
         }
         if (g_foregroundHook) {
