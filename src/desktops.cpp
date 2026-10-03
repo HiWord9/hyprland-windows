@@ -33,12 +33,6 @@
 // desktop to go to, Win+Tab opens Task View, as in Windows.
 #include "common.h"
 
-#include <dwmapi.h>
-#include <objectarray.h>
-#include <servprov.h>
-#include <shellapi.h>
-#include <shobjidl.h>
-
 // Set by the desktop thread once the shell has said it has no desktop manager
 // the mod knows.
 std::atomic<bool> g_desktopSwitchUnsupported;

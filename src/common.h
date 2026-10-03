@@ -11,6 +11,10 @@
 #include <windhawk_utils.h>
 
 #include <dwmapi.h>
+#include <objectarray.h>
+#include <servprov.h>
+#include <shellapi.h>
+#include <shobjidl.h>
 #include <windowsx.h>
 
 #include <algorithm>
@@ -94,7 +98,7 @@ constexpr int kDefaultDragFadeIn = 120;
 constexpr int kDefaultDragFadeOut = 60;
 
 // How long the border color takes to cross from one setting to the other when
-// focus moves. Zero means the default here too.
+// focus moves.
 constexpr int kDefaultBorderFade = 150;
 
 // How close an edge has to come before it sticks, in units of a 96 dpi pixel
