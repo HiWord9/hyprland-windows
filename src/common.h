@@ -337,7 +337,7 @@ int DoubleClickTimeMs();
 // Whether this press and the one before it on this thread are a double click.
 // Takes the tick instead of reading the clock, so the rules are testable.
 bool IsDoubleClickAt(HWND root, POINT pt, DWORD tick);
-void DoWindowAction(HWND hwnd, WindowAction action);
+bool TakeWindowAction(MSG* msg, WindowAction action);
 void RequestWindowAction(HWND root, WindowAction action);
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -35,27 +35,36 @@ int DoubleClickTimeMs() {
     return configured > 0 ? configured : (int)GetDoubleClickTime();
 }
 
-// Runs on the window's own thread.
-void DoWindowAction(HWND hwnd, WindowAction action) {
+// Runs on the window's own thread, in the message hook, with the request the
+// window has just retrieved. Maximize and close turn it into the system
+// command for the application's own DispatchMessage to run, the way a drag
+// does: sent from the hook, a close that asks about unsaved work would hold
+// its prompt with the hook still on the stack, and the mod could not unload
+// until it was answered. Returns whether msg is now that command.
+bool TakeWindowAction(MSG* msg, WindowAction action) {
     switch (action) {
         case WindowAction::ToggleMaximize:
             // Through the window's system menu rather than ShowWindow, so an
             // application that does its own thing with SC_MAXIMIZE keeps
             // doing it.
-            SendMessageW(hwnd, WM_SYSCOMMAND,
-                         IsZoomed(hwnd) ? SC_RESTORE : SC_MAXIMIZE, 0);
-            break;
-        case WindowAction::ToggleTitleBar:
-            HandleFramelessRequest(hwnd, kActionToggle);
-            break;
+            msg->message = WM_SYSCOMMAND;
+            msg->wParam = IsZoomed(msg->hwnd) ? SC_RESTORE : SC_MAXIMIZE;
+            msg->lParam = 0;
+            return true;
         case WindowAction::Close:
             // SC_CLOSE, not a kill: an application with unsaved work gets to
             // ask about it.
-            SendMessageW(hwnd, WM_SYSCOMMAND, SC_CLOSE, 0);
-            break;
+            msg->message = WM_SYSCOMMAND;
+            msg->wParam = SC_CLOSE;
+            msg->lParam = 0;
+            return true;
+        case WindowAction::ToggleTitleBar:
+            HandleFramelessRequest(msg->hwnd, kActionToggle);
+            return false;
         case WindowAction::None:
-            break;
+            return false;
     }
+    return false;
 }
 
 void RequestWindowAction(HWND root, WindowAction action) {
