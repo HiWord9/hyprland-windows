@@ -481,7 +481,7 @@ DWORD WINAPI DesktopThread(LPVOID ready) {
         SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr,
                         OnFrontChanged, 0, 0, WINEVENT_OUTOFCONTEXT);
     SetEvent(static_cast<HANDLE>(ready));
-    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+    while (!g_uninitializing && GetMessageW(&msg, nullptr, 0, 0) > 0) {
         if (g_uninitializing) {
             continue;
         }
