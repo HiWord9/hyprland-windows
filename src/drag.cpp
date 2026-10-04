@@ -119,7 +119,7 @@ bool StartMove(HWND root, POINT pt, MSG* msg) {
     if (IsIconic(root)) {
         return false;
     }
-    if (!(GetAsyncKeyState(VK_LBUTTON) & 0x8000)) {
+    if (!(GetAsyncKeyState(PhysicalButtonVk(false)) & 0x8000)) {
         return false;  // released already; the loop would stick to the cursor
     }
     ForceLeftButtonDown();
