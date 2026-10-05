@@ -42,12 +42,19 @@ the title bar.
 
 ## Installing
 
+- Find [Hyprland Windows](https://windhawk.net/mods/hyprland-windows) in [Windhawk](https://windhawk.net/), and click install.
+
+<details>
+  <summary>OR from github</summary>
+  
 1. Download `hyprland-windows.wh.cpp` from the
    [latest release](../../releases/latest).
 2. In Windhawk, choose **Create new mod**.
 3. Open the downloaded file, copy everything in it, and paste it into the
    editor, replacing what is already there.
 4. Press **Compile** (<kbd>Ctrl</kbd>+<kbd>B</kbd>) and the mod is ready.
+
+</details>
 
 ## Good to know
 
