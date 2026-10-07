@@ -1,3 +1,5 @@
+[![windhawk users counter badge](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fmods.windhawk.net%2Fcatalogs%2Fen.json&query=%24.mods%5B'hyprland-windows'%5D.details.users&style=for-the-badge&logo=data%3Aimage%2Fpng%3Bbase64%2CiVBORw0KGgoAAAANSUhEUgAAAFoAAABaBAMAAADKhlwxAAAAAXNSR0IB2cksfwAAAAlwSFlzAAALEwAACxMBAJqcGAAAAA9QTFRFAAAATyAN%2Fv%2Fb%2F9k9%2F4QALDd9AAAAAAV0Uk5TAP%2F%2F%2F%2F8c0CZSAAAAcElEQVR4nO3SwQ3AIAgFUByBFVyh%2B4%2FQFboCKzT1AEHpnZ%2F8fzAiDy86pIh%2BixWNQQ2kNWujBtKa6%2Blm7W5qNB1mZbtBfY66tY56ypmARo2hf0ceh0KNoQPGU29l%2BU%2Bom%2Bord6ozahAtfhjZGtSd9QvnPMmvbkfYzQAAAABJRU5ErkJggg%3D%3D&label=users&labelColor=0080ff&color=ff328f)](https://windhawk.net/mods/hyprland-windows)
+
 # Hyprland Windows
 
 Window handling the way [Hyprland](https://hypr.land/) does it, on Windows.
