@@ -1277,32 +1277,49 @@ static void TestMoveResize() {
 
     // Aero Snap takes Alt held during a move for its other layouts, which
     // leave maximizing at the top edge out - so the loop is not to see it,
-    // not even as the key repeats.
-    alt.ki.dwFlags = 0;
-    SendInput(1, &alt, sizeof(alt));
-    std::thread dragger([&] {
-        Sleep(60);
-        SendMouse(MOUSEEVENTF_LEFTDOWN);
-        for (int i = 1; i <= 40; i++) {
-            Sleep(20);
-            SetCursorPos(mid.x, mid.y + (mi.rcMonitor.top - mid.y) * i / 40);
-            if (i % 3 == 0) {
-                SendInput(1, &alt, sizeof(alt));
+    // not even as the key repeats. Unless it is let go of and pressed again
+    // halfway, which is asking for those layouts.
+    auto altDragToTop = [&](bool pressAgain) {
+        alt.ki.dwFlags = 0;
+        SendInput(1, &alt, sizeof(alt));
+        std::thread dragger([&] {
+            INPUT altUp = alt;
+            altUp.ki.dwFlags = KEYEVENTF_KEYUP;
+            Sleep(60);
+            SendMouse(MOUSEEVENTF_LEFTDOWN);
+            for (int i = 1; i <= 40; i++) {
+                Sleep(20);
+                SetCursorPos(mid.x,
+                             mid.y + (mi.rcMonitor.top - mid.y) * i / 40);
+                if (pressAgain && i == 15) {
+                    SendInput(1, &altUp, sizeof(altUp));
+                    Sleep(100);
+                }
+                if (i % 3 == 0) {
+                    SendInput(1, &alt, sizeof(alt));
+                }
             }
+            Sleep(600);
+            SendMouse(MOUSEEVENTF_LEFTUP);
+            Sleep(50);
+            SendInput(1, &altUp, sizeof(altUp));
+        });
+        for (int i = 0; i < 38; i++) {
+            PumpRaw(50);
         }
-        Sleep(600);
-        SendMouse(MOUSEEVENTF_LEFTUP);
-    });
-    for (int i = 0; i < 34; i++) {
-        PumpRaw(50);
-    }
-    dragger.join();
-    alt.ki.dwFlags = KEYEVENTF_KEYUP;
-    SendInput(1, &alt, sizeof(alt));
-    PumpRaw(200);
+        dragger.join();
+        PumpRaw(200);
+    };
 
+    altDragToTop(false);
     CHECK(IsZoomed(hwnd), "dragged to the top with Alt, it is maximized");
     CHECK(GetKeyState(VK_MENU) >= 0, "and Alt is up again once let go of");
+    ShowWindow(hwnd, SW_RESTORE);
+    PumpRaw(200);
+
+    altDragToTop(true);
+    CHECK(!IsZoomed(hwnd), "with Alt pressed again on the way, it is not");
+    CHECK(GetKeyState(VK_MENU) >= 0, "and Alt is up after that too");
     ShowWindow(hwnd, SW_RESTORE);
     PumpRaw(200);
     g_settings.dragModifier = DragModifier::Win;

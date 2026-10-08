@@ -22,8 +22,13 @@ void ProcessRetrievedMessage(MSG* msg) {
     switch (msg->message) {
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN:
-            HideAltRepeat(msg);
+            TrackAltInMove(msg);
             consumed = HandleHotkey(msg);
+            break;
+
+        case WM_KEYUP:
+        case WM_SYSKEYUP:
+            TrackAltInMove(msg);
             break;
 
         case WM_HOTKEY:

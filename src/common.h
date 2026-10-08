@@ -325,7 +325,7 @@ bool HandleDragRequest(MSG* msg);
 // After a drag: the left button the loop needed held, let go again.
 void ReleaseForcedLeftButton();
 // Alt, kept from a move loop that would take it for a snap modifier.
-void HideAltRepeat(const MSG* msg);
+void TrackAltInMove(const MSG* msg);
 void RestoreHiddenAlt();
 bool HandleModifierButtonDown(const MSG* msg, bool right);
 bool HandleButtonUp(bool right);

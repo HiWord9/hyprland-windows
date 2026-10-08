@@ -95,7 +95,8 @@ void ReleaseForcedLeftButton() {
 // without maximizing at the top edge. With Alt as the modifier it is held
 // through every move, so the loop is kept from seeing it: it goes from this
 // thread's key state as the move starts, and again after each repeat of the
-// key, and comes back as the keyboard has it once the loop is over.
+// key, and comes back as the keyboard has it once the loop is over. Let go of
+// and pressed again during the move, it is meant for Aero Snap and stays.
 thread_local bool g_altHidden;
 // The first messages of a loop come before the thread is marked as in one, so
 // "not in a loop" only means "over" once it has been seen running.
@@ -121,8 +122,13 @@ void HideAlt() {
     g_altLoopSeen = false;
 }
 
-void HideAltRepeat(const MSG* msg) {
-    if (g_altHidden && msg->wParam == VK_MENU && IsInMoveSizeLoop()) {
+void TrackAltInMove(const MSG* msg) {
+    if (!g_altHidden || msg->wParam != VK_MENU) {
+        return;
+    }
+    if (msg->message == WM_KEYUP || msg->message == WM_SYSKEYUP) {
+        g_altHidden = false;
+    } else if (IsInMoveSizeLoop()) {
         SetAltState(false, false);
     }
 }
