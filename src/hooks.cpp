@@ -15,12 +15,14 @@
 // with the message replaced by WM_NULL if it was consumed by the mod.
 void ProcessRetrievedMessage(MSG* msg) {
     ReleaseForcedLeftButton();
+    RestoreHiddenAlt();
 
     bool consumed = false;
 
     switch (msg->message) {
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN:
+            HideAltRepeat(msg);
             consumed = HandleHotkey(msg);
             break;
 

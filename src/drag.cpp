@@ -91,6 +91,58 @@ void ReleaseForcedLeftButton() {
     }
 }
 
+// A move with Alt held is Aero Snap's cue for the other layouts, the ones
+// without maximizing at the top edge. With Alt as the modifier it is held
+// through every move, so the loop is kept from seeing it: it goes from this
+// thread's key state as the move starts, and again after each repeat of the
+// key, and comes back as the keyboard has it once the loop is over.
+thread_local bool g_altHidden;
+// The first messages of a loop come before the thread is marked as in one, so
+// "not in a loop" only means "over" once it has been seen running.
+thread_local bool g_altLoopSeen;
+
+void SetAltState(bool left, bool right) {
+    BYTE keyState[256];
+    if (!GetKeyboardState(keyState)) {
+        return;
+    }
+    auto set = [&](int vk, bool down) {
+        keyState[vk] = (keyState[vk] & ~0x80) | (down ? 0x80 : 0);
+    };
+    set(VK_LMENU, left);
+    set(VK_RMENU, right);
+    set(VK_MENU, left || right);
+    SetKeyboardState(keyState);
+}
+
+void HideAlt() {
+    SetAltState(false, false);
+    g_altHidden = true;
+    g_altLoopSeen = false;
+}
+
+void HideAltRepeat(const MSG* msg) {
+    if (g_altHidden && msg->wParam == VK_MENU && IsInMoveSizeLoop()) {
+        SetAltState(false, false);
+    }
+}
+
+void RestoreHiddenAlt() {
+    if (!g_altHidden) {
+        return;
+    }
+    if (IsInMoveSizeLoop()) {
+        g_altLoopSeen = true;
+        return;
+    }
+    if (!g_altLoopSeen) {
+        return;
+    }
+    g_altHidden = g_altLoopSeen = false;
+    SetAltState(GetAsyncKeyState(VK_LMENU) & 0x8000,
+                GetAsyncKeyState(VK_RMENU) & 0x8000);
+}
+
 // Nearest corner to the cursor, as the WMSZ_* code SC_SIZE expects (Hyprland
 // resizes from the nearest corner).
 UINT ResizeEdgeForPoint(const RECT& rc, POINT pt) {
@@ -123,6 +175,9 @@ bool StartMove(HWND root, POINT pt, MSG* msg) {
         return false;  // released already; the loop would stick to the cursor
     }
     ForceLeftButtonDown();
+    if (g_settings.dragModifier == DragModifier::Alt) {
+        HideAlt();
+    }
 
     // The system's own caption-drag loop, so the drag gives everything a
     // title-bar drag would: Aero Snap at the screen edges, the Windows 11

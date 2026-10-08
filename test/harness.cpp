@@ -1274,6 +1274,37 @@ static void TestMoveResize() {
     CHECK(IsZoomed(hwnd), "a double click with the modifier held maximized it");
     ShowWindow(hwnd, SW_RESTORE);
     PumpRaw(200);
+
+    // Aero Snap takes Alt held during a move for its other layouts, which
+    // leave maximizing at the top edge out - so the loop is not to see it,
+    // not even as the key repeats.
+    alt.ki.dwFlags = 0;
+    SendInput(1, &alt, sizeof(alt));
+    std::thread dragger([&] {
+        Sleep(60);
+        SendMouse(MOUSEEVENTF_LEFTDOWN);
+        for (int i = 1; i <= 40; i++) {
+            Sleep(20);
+            SetCursorPos(mid.x, mid.y + (mi.rcMonitor.top - mid.y) * i / 40);
+            if (i % 3 == 0) {
+                SendInput(1, &alt, sizeof(alt));
+            }
+        }
+        Sleep(600);
+        SendMouse(MOUSEEVENTF_LEFTUP);
+    });
+    for (int i = 0; i < 34; i++) {
+        PumpRaw(50);
+    }
+    dragger.join();
+    alt.ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(1, &alt, sizeof(alt));
+    PumpRaw(200);
+
+    CHECK(IsZoomed(hwnd), "dragged to the top with Alt, it is maximized");
+    CHECK(GetKeyState(VK_MENU) >= 0, "and Alt is up again once let go of");
+    ShowWindow(hwnd, SW_RESTORE);
+    PumpRaw(200);
     g_settings.dragModifier = DragModifier::Win;
     g_swallowButtonUp[0] = g_swallowButtonUp[1] = false;
 
