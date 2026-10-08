@@ -1322,6 +1322,56 @@ static void TestMoveResize() {
     CHECK(GetKeyState(VK_MENU) >= 0, "and Alt is up after that too");
     ShowWindow(hwnd, SW_RESTORE);
     PumpRaw(200);
+
+    // A click with the modifier held that goes to the application as long as
+    // the mouse doesn't move. With Win, which the installed copy of the mod -
+    // set to Alt - leaves alone.
+    g_settings.dragModifier = DragModifier::Win;
+    auto winPress = [&](POINT delta) {
+        RECT r;
+        GetWindowRect(hwnd, &r);
+        POINT at{(r.left + r.right) / 2, (r.top + r.bottom) / 2};
+        SetCursorPos(at.x, at.y);
+        PumpRaw(50);
+        g_clientClicksSeen = 0;
+        INPUT win{};
+        win.type = INPUT_KEYBOARD;
+        win.ki.wVk = VK_LWIN;
+        win.ki.dwFlags = KEYEVENTF_EXTENDEDKEY;
+        SendInput(1, &win, sizeof(win));
+        std::thread presser([=] {
+            Sleep(60);
+            SendMouse(MOUSEEVENTF_LEFTDOWN);
+            MoveCursorGradually(at, POINT{at.x + delta.x, at.y + delta.y}, 12);
+            Sleep(100);
+            SendMouse(MOUSEEVENTF_LEFTUP);
+        });
+        for (int i = 0; i < 12; i++) {
+            PumpRaw(50);
+        }
+        presser.join();
+        win.ki.dwFlags |= KEYEVENTF_KEYUP;
+        SendInput(1, &win, sizeof(win));
+        PumpRaw(200);
+        RECT after;
+        GetWindowRect(hwnd, &after);
+        return POINT{after.left - r.left, after.top - r.top};
+    };
+
+    g_settings.modifierClick = ModifierClick::App;
+    POINT moved = winPress(POINT{0, 0});
+    CHECK(g_clientClicksSeen == 2 && moved.x == 0 && moved.y == 0,
+          "set to go to the app, a click does (%d messages)",
+          g_clientClicksSeen);
+    moved = winPress(POINT{120, 60});
+    CHECK(g_clientClicksSeen == 0 && moved.x > 100 && moved.y > 50,
+          "and a drag still moves the window (%ld,%ld)", moved.x, moved.y);
+
+    g_settings.modifierClick = ModifierClick::Auto;
+    moved = winPress(POINT{0, 0});
+    CHECK(g_clientClicksSeen == 0, "with Win, the click is the mod's by default");
+    ShowWindow(hwnd, SW_RESTORE);
+    PumpRaw(200);
     g_settings.dragModifier = DragModifier::Win;
     g_swallowButtonUp[0] = g_swallowButtonUp[1] = false;
 

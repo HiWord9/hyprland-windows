@@ -80,6 +80,8 @@ enum class MenuBarMode { Hide, KeepMenu, Skip };
 enum class WindowAction { None, ToggleMaximize, ToggleTitleBar, Close };
 // Which drags fade the window they are dragging.
 enum class DragTranslucency { Both, MoveOnly, Off };
+// Where a click with the modifier held goes when the mouse doesn't move.
+enum class ModifierClick { Auto, App, Window };
 // What a dragged window's edges are magnetic to.
 enum class SnapMode { Both, Monitor, Windows, Off };
 
@@ -124,6 +126,7 @@ struct Settings {
     std::atomic<Hotkey> windowShortcut{};
     std::atomic<WindowAction> windowShortcutAction{WindowAction::Close};
     std::atomic<DragModifier> dragModifier{DragModifier::Win};
+    std::atomic<ModifierClick> modifierClick{ModifierClick::Auto};
     std::atomic<bool> topEdgeResize{false};
     std::atomic<WindowAction> doubleClickAction{WindowAction::ToggleMaximize};
     std::atomic<int> doubleClickTime{0};  // 0: the Windows double-click speed
@@ -164,6 +167,7 @@ COLORREF ParseBorderColor(PCWSTR raw);
 MenuBarMode ParseMenuBarMode(PCWSTR raw);
 int ParseCorners(PCWSTR raw);
 DragTranslucency ParseDragTranslucency(PCWSTR raw);
+ModifierClick ParseModifierClick(PCWSTR raw);
 SnapMode ParseSnapMode(PCWSTR raw);
 bool ParseSnapModifierHold(PCWSTR raw);
 // A single modifier key, as a virtual key; 0 when the setting turns it off.
@@ -328,6 +332,8 @@ void ReleaseForcedLeftButton();
 void TrackAltInMove(const MSG* msg);
 void RestoreHiddenAlt();
 bool HandleModifierButtonDown(const MSG* msg, bool right);
+// A held press that turned out to be a click, handed to the application.
+bool ReplayHeldPress(MSG* msg, bool right);
 bool HandleButtonUp(bool right);
 bool HandleLeftButtonUp();
 

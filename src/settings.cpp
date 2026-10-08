@@ -179,6 +179,17 @@ DragTranslucency ParseDragTranslucency(PCWSTR raw) {
     return DragTranslucency::Both;
 }
 
+ModifierClick ParseModifierClick(PCWSTR raw) {
+    std::wstring s = NormalizeSettingString(raw);
+    if (s == L"APP") {
+        return ModifierClick::App;
+    }
+    if (s == L"WINDOW") {
+        return ModifierClick::Window;
+    }
+    return ModifierClick::Auto;
+}
+
 SnapMode ParseSnapMode(PCWSTR raw) {
     std::wstring s = NormalizeSettingString(raw);
     if (s == L"OFF" || s == L"NONE") {
@@ -290,6 +301,8 @@ void LoadSettings() {
     g_settings.dragModifier = NormalizeSettingString(modifier) == L"ALT"
                                   ? DragModifier::Alt
                                   : DragModifier::Win;
+    WindhawkUtils::StringSetting click(Wh_GetStringSetting(L"drag.click"));
+    g_settings.modifierClick = ParseModifierClick(click);
 
     g_settings.topEdgeResize = Wh_GetIntSetting(L"titleBar.topEdgeResize") != 0;
 
@@ -359,10 +372,11 @@ void LoadSettings() {
     Hotkey key = g_settings.hotkey;
     Hotkey shortcutKey = g_settings.windowShortcut;
     Wh_Log(L"Settings: hotkey vk=0x%02X ctrl=%d alt=%d shift=%d win=%d, "
-           L"dragModifier=%s, topEdgeResize=%d, menuBar=%d, hideByDefault=%d, "
+           L"dragModifier=%s, modifierClick=%d, topEdgeResize=%d, menuBar=%d, hideByDefault=%d, "
            L"dragTranslucency=%d, dragOpacity=%d",
            key.vk, (int)key.ctrl, (int)key.alt, (int)key.shift, (int)key.win,
            g_settings.dragModifier == DragModifier::Alt ? L"alt" : L"win",
+           (int)g_settings.modifierClick.load(),
            (int)g_settings.topEdgeResize, (int)g_settings.menuBarMode.load(),
            (int)g_settings.hideByDefault,
            (int)g_settings.dragTranslucency.load(),

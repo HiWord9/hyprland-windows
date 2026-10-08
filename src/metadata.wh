@@ -122,6 +122,12 @@ the title bar.
   - fadeOut: 60
     $name: Fade-out time
     $description: How long it takes to come back once the drag ends, in milliseconds
+  - click: auto
+    $name: Modifier + click without moving
+    $options:
+    - auto: Goes to the app with Alt, grabs the window with Win
+    - app: Goes to the app
+    - window: Grabs the window
   $name: Moving and resizing
 - snap:
   - mode: both

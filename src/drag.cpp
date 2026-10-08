@@ -319,6 +319,103 @@ bool StartResize(HWND root, POINT pt, MSG* msg) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// A click that may yet go to the application
+//
+// Alt + click means something in plenty of applications, so with Alt the
+// press is held on to instead of starting a drag at once: the drag starts once
+// the mouse moves, and a release before that hands the application the click
+// after all. Win + click means nothing anywhere, so with Win the window is
+// grabbed at once - unless the settings say otherwise.
+
+bool ClickGoesToApp() {
+    switch (g_settings.modifierClick) {
+        case ModifierClick::App:
+            return true;
+        case ModifierClick::Window:
+            return false;
+        default:
+            return g_settings.dragModifier == DragModifier::Alt;
+    }
+}
+
+struct HeldPress {
+    bool active;
+    HWND hwnd;
+    UINT message;
+    WPARAM wParam;
+    LPARAM lParam;
+};
+thread_local HeldPress g_heldPress[2];  // [0] = left, [1] = right
+
+struct PressWatch {
+    HWND root;
+    POINT pt;
+    WPARAM kind;
+    int buttonVk;
+};
+
+// Waits for the mouse to move past the drag threshold, and asks for the drag
+// then. A release first leaves the press to ReplayHeldPress.
+DWORD WINAPI PressWatchThread(LPVOID param) {
+    {
+        std::unique_ptr<PressWatch> watch(static_cast<PressWatch*>(param));
+        int cx = GetSystemMetrics(SM_CXDRAG);
+        int cy = GetSystemMetrics(SM_CYDRAG);
+        while (!g_uninitializing &&
+               (GetAsyncKeyState(watch->buttonVk) & 0x8000)) {
+            POINT pt;
+            GetCursorPos(&pt);
+            if (abs(pt.x - watch->pt.x) > cx || abs(pt.y - watch->pt.y) > cy) {
+                RequestDrag(watch->root, watch->kind, watch->pt);
+                break;
+            }
+            Sleep(kResizePollMs);
+        }
+    }
+    g_modRefCount--;  // the last thing this thread does in the mod's image
+    return 0;
+}
+
+bool HoldPress(HWND root, const MSG* msg, bool right) {
+    auto* watch = new PressWatch{root, msg->pt,
+                                 right ? (WPARAM)kDragResize : kDragMove,
+                                 PhysicalButtonVk(right)};
+    if (!StartModThread(PressWatchThread, watch)) {
+        delete watch;
+        return false;
+    }
+    g_heldPress[right] = {true, msg->hwnd, msg->message, msg->wParam,
+                          msg->lParam};
+    return true;
+}
+
+// The release comes before any drag did: the press goes to the application
+// in its place, and the release is posted to follow it.
+bool ReplayHeldPress(MSG* msg, bool right) {
+    HeldPress press = g_heldPress[right];
+    if (!press.active) {
+        return false;
+    }
+    g_heldPress[right].active = false;
+
+    bool nonClient = press.message == WM_NCLBUTTONDOWN ||
+                     press.message == WM_NCLBUTTONDBLCLK ||
+                     press.message == WM_NCRBUTTONDOWN ||
+                     press.message == WM_NCRBUTTONDBLCLK;
+    UINT up = nonClient ? (right ? WM_NCRBUTTONUP : WM_NCLBUTTONUP)
+                        : (right ? WM_RBUTTONUP : WM_LBUTTONUP);
+    WPARAM upParam = nonClient ? press.wParam
+                               : press.wParam & ~(MK_LBUTTON | MK_RBUTTON);
+    PostMessageW(press.hwnd, up, upParam, press.lParam);
+
+    msg->hwnd = press.hwnd;
+    msg->message = press.message;
+    msg->wParam = press.wParam;
+    msg->lParam = press.lParam;
+    return true;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // The requests, and the presses that make them
 
 bool HandleDragRequest(MSG* msg) {
@@ -348,6 +445,12 @@ bool HandleDragRequest(MSG* msg) {
     bool started = kind == kDragResize ? StartResize(root, pt, msg)
                                        : StartMove(root, pt, msg);
     if (started) {
+        // A held press is a drag after all, and the release is the loop's -
+        // or, for a resize, the mod's to swallow.
+        g_heldPress[kind == kDragResize].active = false;
+        if (kind == kDragResize) {
+            g_swallowButtonUp[1] = true;
+        }
         BeginDragSnap(root, kind, pt);
         BeginDragFade(root, kind);
     }
@@ -365,6 +468,7 @@ bool HandleModifierButtonDown(const MSG* msg, bool right) {
     // the release the flag below is waiting for.
     g_swallowButtonUp[right] = false;
     g_pendingRelease = false;
+    g_heldPress[right].active = false;
 
     // A drag is already running on this thread: its loop pumps messages, so
     // presses during one arrive here too.
@@ -396,6 +500,10 @@ bool HandleModifierButtonDown(const MSG* msg, bool right) {
     Wh_Log(L"%s %p", right ? L"Resize" : L"Move", root);
     ArmWinMask(g_settings.dragModifier == DragModifier::Win);
 
+    if (ClickGoesToApp()) {
+        // Swallowed for now, and handed back if the mouse doesn't move.
+        return HoldPress(root, msg, right);
+    }
     if (right) {
         // We consumed the right button-down, so swallow its matching up too:
         // the resize loop ends on the release the mod posts, not on the

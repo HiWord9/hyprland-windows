@@ -67,11 +67,17 @@ void ProcessRetrievedMessage(MSG* msg) {
 
         case WM_LBUTTONUP:
         case WM_NCLBUTTONUP:
+            if (ReplayHeldPress(msg, false)) {
+                break;
+            }
             consumed = HandleShortcutButtonUp(msg) || HandleLeftButtonUp();
             break;
 
         case WM_RBUTTONUP:
         case WM_NCRBUTTONUP:
+            if (ReplayHeldPress(msg, true)) {
+                break;
+            }
             consumed = HandleShortcutButtonUp(msg) || HandleButtonUp(true);
             break;
 
