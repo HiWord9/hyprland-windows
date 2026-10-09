@@ -353,6 +353,7 @@ int DoubleClickTimeMs();
 // Takes the tick instead of reading the clock, so the rules are testable.
 bool IsDoubleClickAt(HWND root, POINT pt, DWORD tick);
 bool TakeWindowAction(MSG* msg, WindowAction action);
+bool CanTakeAction(HWND root, WindowAction action);
 void RequestWindowAction(HWND root, WindowAction action);
 
 ////////////////////////////////////////////////////////////////////////////////

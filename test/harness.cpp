@@ -2622,6 +2622,38 @@ static void TestGestures() {
     Pump(400);
     CHECK(!IsWindow(hwnd), "the close action closes the window");
     Pump(100);
+
+    // Any window Alt+F4 could close closes, frame or not; the rest of the
+    // actions still want a frame.
+    HWND popup = CreateWindowExW(0, L"HyprlandWindowsTestWnd", L"Hypr popup",
+                                 WS_POPUP | WS_VISIBLE, 300, 300, 400, 300,
+                                 nullptr, nullptr, GetModuleHandleW(nullptr),
+                                 nullptr);
+    CHECK(CanTakeAction(popup, WindowAction::Close) &&
+              !CanTakeAction(popup, WindowAction::ToggleMaximize),
+          "a borderless window may be closed, and only that");
+    EnableWindow(popup, FALSE);
+    CHECK(!CanTakeAction(popup, WindowAction::Close),
+          "but not while disabled, behind a dialog of its own");
+    EnableWindow(popup, TRUE);
+    RequestWindowAction(popup, WindowAction::Close);
+    Pump(400);
+    CHECK(!IsWindow(popup), "the close action closes the borderless one");
+
+    WNDCLASSW noClose{};
+    noClose.style = CS_NOCLOSE;
+    noClose.lpfnWndProc = DefWindowProcW;
+    noClose.hInstance = GetModuleHandleW(nullptr);
+    noClose.lpszClassName = L"HyprlandWindowsNoCloseWnd";
+    RegisterClassW(&noClose);
+    HWND kept = CreateWindowExW(0, noClose.lpszClassName, L"Hypr no close",
+                                WS_OVERLAPPEDWINDOW | WS_VISIBLE, 300, 300,
+                                400, 300, nullptr, nullptr,
+                                GetModuleHandleW(nullptr), nullptr);
+    CHECK(!CanTakeAction(kept, WindowAction::Close),
+          "nor one whose class says CS_NOCLOSE, as Alt+F4 has it");
+    DestroyWindow(kept);
+    Pump(100);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

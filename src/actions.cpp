@@ -67,6 +67,25 @@ bool TakeWindowAction(MSG* msg, WindowAction action) {
     return false;
 }
 
+// Closing is Alt+F4 pointed at the window under the cursor rather than at
+// the focused one. DefWindowProc answers Alt+F4 with SC_CLOSE to the top-level
+// window the focus is in unless its class says CS_NOCLOSE, whatever its
+// styles - so any window that could have the focus closes, frame or not. The
+// rest of the actions want a real frame, as a drag does.
+bool CanTakeAction(HWND root, WindowAction action) {
+    if (action != WindowAction::Close) {
+        return IsFrameWindow(root);
+    }
+    if (!root || !IsWindow(root) || IsExcludedClass(root)) {
+        return false;
+    }
+    LONG_PTR style = GetWindowLongPtrW(root, GWL_STYLE);
+    LONG_PTR exStyle = GetWindowLongPtrW(root, GWL_EXSTYLE);
+    return !(style & (WS_CHILD | WS_DISABLED)) &&
+           !(exStyle & WS_EX_NOACTIVATE) &&
+           !(GetClassLongPtrW(root, GCL_STYLE) & CS_NOCLOSE);
+}
+
 void RequestWindowAction(HWND root, WindowAction action) {
     if (!PostMessageW(root, g_msgDrag, kDragAction, (LPARAM)action)) {
         Wh_Log(L"Action request for %p failed (%u)", root, GetLastError());
@@ -167,7 +186,7 @@ bool HandleShortcutButton(const MSG* msg) {
     if (!root) {
         root = msg->hwnd;
     }
-    if (!IsFrameWindow(root)) {
+    if (!CanTakeAction(root, action)) {
         return false;  // desktop, taskbar, menus... - normal click
     }
 

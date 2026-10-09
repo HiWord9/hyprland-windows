@@ -428,10 +428,11 @@ bool HandleDragRequest(MSG* msg) {
     }
 
     if (msg->wParam == kDragAction) {
-        if (g_uninitializing || !IsFrameWindow(root)) {
+        auto action = (WindowAction)msg->lParam;
+        if (g_uninitializing || !CanTakeAction(root, action)) {
             return false;
         }
-        return TakeWindowAction(msg, (WindowAction)msg->lParam);
+        return TakeWindowAction(msg, action);
     }
 
     // Checked again here: the request came from another thread, possibly in

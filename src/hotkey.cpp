@@ -25,7 +25,7 @@ bool HandleHotkey(const MSG* msg) {
     WindowAction action = g_settings.windowShortcutAction;
     if (!g_uninitializing && action != WindowAction::None &&
         !IsMouseButtonVk(shortcut.vk) && MatchesShortcut(shortcut, vk) &&
-        IsFrameWindow(target)) {
+        CanTakeAction(target, action)) {
         Wh_Log(L"Shortcut key on %p", target);
         RequestWindowAction(target, action);
         return true;
@@ -84,7 +84,7 @@ bool HandleBindingKey(UINT vk, bool down) {
     if (toggle) {
         Wh_Log(L"Hotkey: toggling %p (keyboard hook)", target);
         RequestFrameless(target, kActionToggle);
-    } else if (IsFrameWindow(target)) {
+    } else if (CanTakeAction(target, action)) {
         Wh_Log(L"Shortcut key on %p (keyboard hook)", target);
         RequestWindowAction(target, action);
     }
