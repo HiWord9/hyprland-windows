@@ -790,7 +790,41 @@ static void TestAutoHide() {
 ////////////////////////////////////////////////////////////////////////////////
 // Move / resize loop tests (inject mouse input)
 
+// Every press the tests make has to land on a window of the harness. One that
+// would land anywhere else - an application on the desktop the harness was
+// started on - stops the run instead, with the keys it may hold let go of.
+static void StopUnlessPressIsOurs(DWORD flags) {
+    if (!(flags & (MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_RIGHTDOWN |
+                   MOUSEEVENTF_MIDDLEDOWN | MOUSEEVENTF_XDOWN))) {
+        return;
+    }
+    POINT pt;
+    GetCursorPos(&pt);
+    HWND under = WindowFromPoint(pt);
+    DWORD pid = 0;
+    GetWindowThreadProcessId(under, &pid);
+    if (pid == GetCurrentProcessId()) {
+        return;
+    }
+    WCHAR cls[64] = L"";
+    GetClassNameW(under, cls, ARRAYSIZE(cls));
+    printf("\nSTOPPED: a press at %ld,%ld would land on [%ls] of process %lu, "
+           "not on the harness\n",
+           pt.x, pt.y, cls, pid);
+    for (WORD vk : {VK_LWIN, VK_MENU, VK_CONTROL, VK_SHIFT}) {
+        INPUT up{};
+        up.type = INPUT_KEYBOARD;
+        up.ki.wVk = vk;
+        up.ki.dwFlags = KEYEVENTF_KEYUP |
+                        (vk == VK_LWIN ? KEYEVENTF_EXTENDEDKEY : 0);
+        SendInput(1, &up, sizeof(up));
+    }
+    fflush(stdout);
+    ExitProcess(3);
+}
+
 static void SendMouse(DWORD flags, DWORD data = 0) {
+    StopUnlessPressIsOurs(flags);
     INPUT in{};
     in.type = INPUT_MOUSE;
     in.mi.dwFlags = flags;
@@ -1279,7 +1313,19 @@ static void TestMoveResize() {
     // leave maximizing at the top edge out - so the loop is not to see it,
     // not even as the key repeats. Unless it is let go of and pressed again
     // halfway, which is asking for those layouts.
+    // Each press starts from the window where it was, with the cursor on it:
+    // the drag before left both up against the top of the screen.
+    auto putBack = [&] {
+        ShowWindow(hwnd, SW_RESTORE);
+        SetWindowPos(hwnd, nullptr, rGesture.left, rGesture.top,
+                     rGesture.right - rGesture.left,
+                     rGesture.bottom - rGesture.top,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+        SetCursorPos(mid.x, mid.y);
+        PumpRaw(150);
+    };
     auto altDragToTop = [&](bool pressAgain) {
+        putBack();
         alt.ki.dwFlags = 0;
         SendInput(1, &alt, sizeof(alt));
         std::thread dragger([&] {
@@ -1324,21 +1370,29 @@ static void TestMoveResize() {
     PumpRaw(200);
 
     // A click with the modifier held that goes to the application as long as
-    // the mouse doesn't move. With Win, which the installed copy of the mod -
-    // set to Alt - leaves alone.
-    g_settings.dragModifier = DragModifier::Win;
-    auto winPress = [&](POINT delta) {
+    // the mouse doesn't move. The installed copy of the mod is in this
+    // process too and takes the presses made with its own modifier - a click
+    // handed back included - so this goes by the other one.
+    WCHAR installed[16] = L"";
+    DWORD size = sizeof(installed);
+    RegGetValueW(HKEY_LOCAL_MACHINE,
+                 L"SOFTWARE\\Windhawk\\Engine\\Mods\\local@hyprland-windows\\Settings",
+                 L"drag.modifier", RRF_RT_REG_SZ, nullptr, installed, &size);
+    bool useAlt = _wcsicmp(installed, L"alt") != 0;
+    g_settings.dragModifier = useAlt ? DragModifier::Alt : DragModifier::Win;
+    auto modifierPress = [&](POINT delta) {
+        putBack();
         RECT r;
         GetWindowRect(hwnd, &r);
         POINT at{(r.left + r.right) / 2, (r.top + r.bottom) / 2};
         SetCursorPos(at.x, at.y);
         PumpRaw(50);
         g_clientClicksSeen = 0;
-        INPUT win{};
-        win.type = INPUT_KEYBOARD;
-        win.ki.wVk = VK_LWIN;
-        win.ki.dwFlags = KEYEVENTF_EXTENDEDKEY;
-        SendInput(1, &win, sizeof(win));
+        INPUT key{};
+        key.type = INPUT_KEYBOARD;
+        key.ki.wVk = useAlt ? VK_MENU : VK_LWIN;
+        key.ki.dwFlags = useAlt ? 0 : KEYEVENTF_EXTENDEDKEY;
+        SendInput(1, &key, sizeof(key));
         std::thread presser([=] {
             Sleep(60);
             SendMouse(MOUSEEVENTF_LEFTDOWN);
@@ -1350,8 +1404,8 @@ static void TestMoveResize() {
             PumpRaw(50);
         }
         presser.join();
-        win.ki.dwFlags |= KEYEVENTF_KEYUP;
-        SendInput(1, &win, sizeof(win));
+        key.ki.dwFlags |= KEYEVENTF_KEYUP;
+        SendInput(1, &key, sizeof(key));
         PumpRaw(200);
         RECT after;
         GetWindowRect(hwnd, &after);
@@ -1359,17 +1413,24 @@ static void TestMoveResize() {
     };
 
     g_settings.modifierClick = ModifierClick::App;
-    POINT moved = winPress(POINT{0, 0});
+    POINT moved = modifierPress(POINT{0, 0});
     CHECK(g_clientClicksSeen == 2 && moved.x == 0 && moved.y == 0,
           "set to go to the app, a click does (%d messages)",
           g_clientClicksSeen);
-    moved = winPress(POINT{120, 60});
+    moved = modifierPress(POINT{120, 60});
     CHECK(g_clientClicksSeen == 0 && moved.x > 100 && moved.y > 50,
           "and a drag still moves the window (%ld,%ld)", moved.x, moved.y);
 
+    g_settings.modifierClick = ModifierClick::Window;
+    moved = modifierPress(POINT{0, 0});
+    CHECK(g_clientClicksSeen == 0 && moved.x == 0 && moved.y == 0,
+          "set to grab the window, the click is the mod's");
+
     g_settings.modifierClick = ModifierClick::Auto;
-    moved = winPress(POINT{0, 0});
-    CHECK(g_clientClicksSeen == 0, "with Win, the click is the mod's by default");
+    moved = modifierPress(POINT{0, 0});
+    CHECK((g_clientClicksSeen == 2) == useAlt,
+          "and by default it is the app's with Alt only (%d messages)",
+          g_clientClicksSeen);
     ShowWindow(hwnd, SW_RESTORE);
     PumpRaw(200);
     g_settings.dragModifier = DragModifier::Win;
