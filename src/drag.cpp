@@ -215,6 +215,7 @@ bool StartMove(HWND root, POINT pt, MSG* msg) {
 thread_local bool g_pendingRelease;
 
 constexpr int kResizePollMs = 8;
+constexpr int kResizeLoopPollEvery = 12;  // about a tenth of a second
 // A second release 60 ms later is not something anyone can see; a resize that
 // stays glued to the cursor is.
 constexpr int kReleaseAttempts = 10;
@@ -253,10 +254,16 @@ DWORD WINAPI ResizeReleaseThread(LPVOID param) {
         // Then the button, and the loop, whichever ends first: one cancelled
         // with Esc has already put the window back and wants no release. The
         // mod being on its way out counts as the button being let go of - a
-        // loop nobody is left to post to would never end.
-        while (IsThreadInMoveSizeLoop(release->threadId) &&
-               (GetAsyncKeyState(release->rightVk) & 0x8000) &&
-               !g_uninitializing) {
+        // loop nobody is left to post to would never end. The loop is asked
+        // after less often than the button: asking takes a lock the loop
+        // itself needs at every step, and a heavy window feels it.
+        for (int poll = 1; (GetAsyncKeyState(release->rightVk) & 0x8000) &&
+                           !g_uninitializing;
+             poll++) {
+            if (poll % kResizeLoopPollEvery == 0 &&
+                !IsThreadInMoveSizeLoop(release->threadId)) {
+                break;
+            }
             Sleep(kResizePollMs);
         }
 
