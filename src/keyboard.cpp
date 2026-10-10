@@ -68,6 +68,16 @@ bool WinKeyDown() {
            0;
 }
 
+// Which keys the armed mask is for. Alt has a lone tap of its own to keep
+// from happening, when it is the modifier: the window's menu, or the access
+// keys of a XAML app. Only ever touched on the server thread.
+bool g_maskWin, g_maskAlt;
+constexpr WPARAM kMaskForWin = 1, kMaskForAlt = 2;
+
+bool AltKeyDown() {
+    return (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+}
+
 LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
     ModRef ref;  // the image must not go away under this procedure
 
@@ -83,16 +93,18 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
     if (!ours && HandleBindingKey(info->vkCode, !keyUp)) {
         return 1;
     }
-    if (g_winMaskArmed) {
-        bool isWin = info->vkCode == VK_LWIN || info->vkCode == VK_RWIN;
-        if (keyUp && isWin && ours) {
-            // Another mask - armed in some other process for the same press -
-            // got to this release first. Standing down with it, rather than
-            // staying armed, keeps this one from eating the next Win tap.
-            g_winMaskArmed = false;
-        } else if (keyUp && isWin && !ours) {
-            g_winMaskArmed = false;
-
+    bool isWin = info->vkCode == VK_LWIN || info->vkCode == VK_RWIN;
+    bool isAlt = info->vkCode == VK_LMENU || info->vkCode == VK_RMENU ||
+                 info->vkCode == VK_MENU;
+    if (g_winMaskArmed && keyUp &&
+        ((isWin && g_maskWin) || (isAlt && g_maskAlt))) {
+        // An injected release is another mask's - armed in some other
+        // process for the same press - that got to it first. Standing down
+        // with it, rather than staying armed, keeps this one from eating the
+        // next tap.
+        (isWin ? g_maskWin : g_maskAlt) = false;
+        g_winMaskArmed = g_maskWin || g_maskAlt;
+        if (!ours) {
             INPUT input[3]{};
             input[0].type = INPUT_KEYBOARD;
             input[0].ki.wVk = kMaskVk;
@@ -104,7 +116,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
             input[2].ki.dwFlags = KEYEVENTF_KEYUP;
             input[2].ki.dwExtraInfo = kInjectedMarker;
             SendInput(ARRAYSIZE(input), input, sizeof(INPUT));
-            return 1;  // swallow the physical Win key-up
+            return 1;  // swallow the physical key-up
         }
     }
     return CallNextHookEx(nullptr, code, wParam, lParam);
@@ -133,14 +145,18 @@ void UpdateKeyboardHook() {
 
 void DisarmMask(HWND hwnd) {
     g_winMaskArmed = false;
+    g_maskWin = g_maskAlt = false;
     KillTimer(hwnd, kMaskTimerId);
     UpdateKeyboardHook();
 }
 
-void ArmMask(HWND hwnd) {
-    if (g_uninitializing || !WinKeyDown()) {
-        // The press is already over, and a mask armed for it now would be
-        // left for the next one.
+void ArmMask(HWND hwnd, WPARAM keys) {
+    // A press that is already over gets none: a mask armed for it now would
+    // be left for the next one.
+    g_maskWin |= (keys & kMaskForWin) && WinKeyDown();
+    g_maskAlt |= (keys & kMaskForAlt) && AltKeyDown();
+    if (g_uninitializing || !(g_maskWin || g_maskAlt)) {
+        g_maskWin = g_maskAlt = false;
         return;
     }
     g_winMaskArmed = true;
@@ -182,14 +198,16 @@ LRESULT CALLBACK KeyboardServerProc(HWND hwnd, UINT msg, WPARAM wParam,
                                 LPARAM lParam) {
     switch (msg) {
         case kMaskArm:
-            ArmMask(hwnd);
+            ArmMask(hwnd, wParam);
             return 0;
         case WM_TIMER:
             // The hook takes the mask down when it masks a release. A release
             // can also go by without reaching it at all, and a mask that
             // outlived its press would swallow the next one - so the key being
             // up is what ends it.
-            if (!g_winMaskArmed || !WinKeyDown()) {
+            g_maskWin = g_maskWin && WinKeyDown();
+            g_maskAlt = g_maskAlt && AltKeyDown();
+            if (!g_winMaskArmed || !(g_maskWin || g_maskAlt)) {
                 DisarmMask(hwnd);
             }
             return 0;
@@ -388,18 +406,20 @@ bool IsElevatedProcess() {
     return elevated;
 }
 
-// Called by whatever just consumed a Win + mouse gesture; `usingWin` is that
-// gesture's own answer to whether the Win key is part of it, because the
-// modifier is not the same setting for every one of them.
-void ArmWinMask(bool usingWin) {
-    if (!usingWin || g_uninitializing || !WinKeyDown()) {
+// Called by whatever just consumed a Win + mouse gesture; `usingWin` and
+// `usingAlt` are that gesture's own answer to which of the keys are part of
+// it, because the modifier is not the same setting for every one of them.
+void ArmWinMask(bool usingWin, bool usingAlt) {
+    WPARAM keys = (usingWin && WinKeyDown() ? kMaskForWin : 0) |
+                  (usingAlt && AltKeyDown() ? kMaskForAlt : 0);
+    if (!keys || g_uninitializing) {
         return;
     }
     HWND server = FindKeyboardServer();
     if (!server) {
         server = StartServer();
     }
-    if (!server || !PostMessageW(server, kMaskArm, 0, 0)) {
+    if (!server || !PostMessageW(server, kMaskArm, keys, 0)) {
         Wh_Log(L"No Start menu mask to arm (%u)", GetLastError());
     }
     // Windows keeps the keys typed into an elevated window - Task Manager,
@@ -411,7 +431,7 @@ void ArmWinMask(bool usingWin) {
     if (IsElevatedProcess()) {
         HWND own = StartServer();
         if (own && own != server) {
-            PostMessageW(own, kMaskArm, 0, 0);
+            PostMessageW(own, kMaskArm, keys, 0);
         }
     }
 }

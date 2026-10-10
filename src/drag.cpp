@@ -492,14 +492,16 @@ bool HandleModifierButtonDown(const MSG* msg, bool right) {
     if (!right && action != WindowAction::None &&
         IsDoubleClickAt(root, msg->pt, GetTickCount())) {
         Wh_Log(L"Double click on %p", root);
-        ArmWinMask(g_settings.dragModifier == DragModifier::Win);
+        ArmWinMask(g_settings.dragModifier == DragModifier::Win,
+                   g_settings.dragModifier == DragModifier::Alt);
         g_swallowButtonUp[0] = true;  // we took the press, so its release too
         RequestWindowAction(root, action);
         return true;
     }
 
     Wh_Log(L"%s %p", right ? L"Resize" : L"Move", root);
-    ArmWinMask(g_settings.dragModifier == DragModifier::Win);
+    ArmWinMask(g_settings.dragModifier == DragModifier::Win,
+               g_settings.dragModifier == DragModifier::Alt);
 
     if (ClickGoesToApp()) {
         // Swallowed for now, and handed back if the mouse doesn't move.
