@@ -270,6 +270,9 @@ constexpr WORD kMaskVk = 0xE8;  // unassigned VK, only used as "a key was hit"
 // Marks the keystrokes the mod injects to keep the Start menu shut, so its
 // own low-level hook lets them through.
 constexpr ULONG_PTR kInjectedMarker = 0x48797072;  // 'Hypr'
+// And a press the shell's mouse hook took, pressed again by the window it was
+// for - see mouse.cpp. An ordinary press for everything but that hook.
+constexpr ULONG_PTR kReplayMarker = 0x48797073;  // 'Hyps'
 
 void ArmWinMask(bool usingWin, bool usingAlt = false);
 void MaskModifierTap();
@@ -304,6 +307,13 @@ enum DragKind : WPARAM {
     // Sent, not posted, and answered by the drag subclass rather than by the
     // message hook: the teardown taking that subclass off - see snap.cpp.
     kDragUnsnap = 4,
+    // From the shell's mouse hook: a press it took over content that gets its
+    // input past the message queue, to be pressed again where the window sees
+    // it, with the MOUSEEVENTF_ flag and the X button in lParam - see
+    // mouse.cpp.
+    kDragUncover = 5,
+    // And once that press has gone through: the window covers up again.
+    kDragCover = 6,
 };
 
 // How long the thread that ends a resize waits for its loop to start. The
@@ -312,6 +322,12 @@ enum DragKind : WPARAM {
 constexpr int kMoveSizeStartWaitMs = 500;
 
 bool IsDragModifierDown();
+LRESULT CALLBACK LowLevelMouseProc(int code, WPARAM wParam, LPARAM lParam);
+bool HasCompositionContentWindow();
+void UncoverAndPress(HWND root, const MSG* msg);
+void RestoreUncoveredAfterReplay();
+void RestoreUncovered(bool allThreads = false);
+void RestoreAllUncovered();
 bool IsThreadInMoveSizeLoop(DWORD threadId);
 bool IsInMoveSizeLoop();
 int PhysicalButtonVk(bool right);

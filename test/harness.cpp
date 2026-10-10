@@ -1431,6 +1431,75 @@ static void TestMoveResize() {
     CHECK((g_clientClicksSeen == 2) == useAlt,
           "and by default it is the app's with Alt only (%d messages)",
           g_clientClicksSeen);
+
+    // Content drawn by composition alone takes its input past the message
+    // queue, so a press on it comes through the shell's mouse hook: taken
+    // there, and pressed again through a hole in the content. This content
+    // is a plain child that would take a press as a message - which it must
+    // not get. The hook runs on a thread of its own, as in the shell, and is
+    // installed after the shell's, so that it comes first.
+    static int contentClicks;
+    WNDCLASSW contentClass{};
+    contentClass.lpfnWndProc = [](HWND h, UINT m, WPARAM w, LPARAM l) -> LRESULT {
+        if (m == WM_LBUTTONDOWN || m == WM_LBUTTONUP) {
+            contentClicks++;
+        }
+        return DefWindowProcW(h, m, w, l);
+    };
+    contentClass.hInstance = GetModuleHandleW(nullptr);
+    contentClass.lpszClassName = L"HyprlandWindowsTestContent";
+    RegisterClassW(&contentClass);
+    RECT client;
+    GetClientRect(hwnd, &client);
+    HWND content = CreateWindowExW(
+        WS_EX_NOREDIRECTIONBITMAP, contentClass.lpszClassName, nullptr,
+        WS_CHILD | WS_VISIBLE, 0, 0, client.right, client.bottom, hwnd,
+        nullptr, GetModuleHandleW(nullptr), nullptr);
+    std::atomic<DWORD> hookThreadId{0};
+    std::atomic<bool> hookIn{false};
+    std::thread hookThread([&] {
+        MSG m;
+        PeekMessageW(&m, nullptr, 0, 0, PM_NOREMOVE);
+        HHOOK hook =
+            SetWindowsHookExW(WH_MOUSE_LL, LowLevelMouseProc, nullptr, 0);
+        hookIn = hook != nullptr;
+        hookThreadId = GetCurrentThreadId();
+        while (GetMessageW(&m, nullptr, 0, 0) > 0) {
+            DispatchMessageW(&m);
+        }
+        if (hook) {
+            UnhookWindowsHookEx(hook);
+        }
+    });
+    while (!hookThreadId) {
+        Sleep(10);
+    }
+    CHECK(hookIn, "the low-level mouse hook goes in");
+
+    g_settings.modifierClick = ModifierClick::Window;
+    contentClicks = 0;
+    // The press goes in again a frame or two late, waiting for the patch
+    // over the hole to be on the screen. A real mouse is held where it is
+    // meanwhile; SetCursorPos, which moves this one, is no input to hold.
+    moved = modifierPress(POINT{120, 60});
+    CHECK(contentClicks == 0 && moved.x > 60 && moved.y > 30,
+          "pressed on composition content, a drag moves the window "
+          "(%ld,%ld, %d clicks on the content)",
+          moved.x, moved.y, contentClicks);
+    HRGN region = CreateRectRgn(0, 0, 0, 0);
+    CHECK(GetWindowRgn(content, region) == ERROR,
+          "and the content has its region back");
+    DeleteObject(region);
+    g_settings.modifierClick = ModifierClick::App;
+    contentClicks = 0;
+    moved = modifierPress(POINT{0, 0});
+    CHECK(contentClicks == 2 && moved.x == 0 && moved.y == 0,
+          "and a click held for the app goes to the content (%d messages)",
+          contentClicks);
+    PostThreadMessageW(hookThreadId, WM_QUIT, 0, 0);
+    hookThread.join();
+    DestroyWindow(content);
+    g_settings.modifierClick = ModifierClick::Auto;
     ShowWindow(hwnd, SW_RESTORE);
     PumpRaw(200);
     g_settings.dragModifier = DragModifier::Win;

@@ -16,6 +16,7 @@
 void ProcessRetrievedMessage(MSG* msg) {
     ReleaseForcedLeftButton();
     RestoreHiddenAlt();
+    RestoreUncoveredAfterReplay();
 
     bool consumed = false;
 

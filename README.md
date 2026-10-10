@@ -66,9 +66,6 @@ the title bar.
   is once the title bar is gone, so by default it is hidden along with it and
   stays reachable from the keyboard with `Alt` or `F10`. The settings offer the
   other choices.
-* `Win` + mouse doesn't work over content drawn with WinUI or XAML — Paint,
-  Windows Terminal, the tabs and address bar of File Explorer: Windows hands
-  those clicks to the app past the point where the mod sees them.
 * Win+Tab switches desktops through a part of Windows that Microsoft doesn't
   publish. It is known for Windows 10 and for Windows 11 from 22H2 on; on a
   build the mod doesn't recognize, and with only the one desktop, Win+Tab stays
