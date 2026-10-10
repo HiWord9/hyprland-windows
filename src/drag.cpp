@@ -347,6 +347,7 @@ bool ClickGoesToApp() {
 
 struct HeldPress {
     bool active;
+    bool replayed;  // pressed again by the window for the shell's mouse hook
     HWND hwnd;
     UINT message;
     WPARAM wParam;
@@ -391,8 +392,9 @@ bool HoldPress(HWND root, const MSG* msg, bool right) {
         delete watch;
         return false;
     }
-    g_heldPress[right] = {true, msg->hwnd, msg->message, msg->wParam,
-                          msg->lParam};
+    g_heldPress[right] = {true,
+                          GetMessageExtraInfo() == (LPARAM)kReplayMarker,
+                          msg->hwnd, msg->message, msg->wParam, msg->lParam};
     return true;
 }
 
@@ -404,6 +406,22 @@ bool ReplayHeldPress(MSG* msg, bool right) {
         return false;
     }
     g_heldPress[right].active = false;
+
+    if (press.replayed) {
+        // It went through a hole in content that takes its input past the
+        // queue (mouse.cpp), so posting it would miss the content. As input,
+        // with the hole closed, it goes where the click was meant to.
+        INPUT input[2]{};
+        input[0].type = INPUT_MOUSE;
+        input[0].mi.dwFlags =
+            right ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN;
+        input[0].mi.dwExtraInfo = kInjectedMarker;
+        input[1] = input[0];
+        input[1].mi.dwFlags = right ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_LEFTUP;
+        SendInput(ARRAYSIZE(input), input, sizeof(INPUT));
+        msg->message = WM_NULL;
+        return true;
+    }
 
     bool nonClient = press.message == WM_NCLBUTTONDOWN ||
                      press.message == WM_NCLBUTTONDBLCLK ||
@@ -432,6 +450,15 @@ bool HandleDragRequest(MSG* msg) {
     if (msg->wParam == kDragUnfade) {
         EndDragFade(root);
         return false;  // ours, and there is nothing to dispatch
+    }
+
+    if (msg->wParam == kDragCover) {
+        RestoreUncovered();
+        return false;
+    }
+    if (msg->wParam == kDragUncover) {
+        UncoverAndPress(root, msg);
+        return false;
     }
 
     if (msg->wParam == kDragAction) {
@@ -469,6 +496,9 @@ bool HandleDragRequest(MSG* msg) {
 thread_local bool g_swallowButtonUp[2];  // [0] = left, [1] = right
 
 bool HandleModifierButtonDown(const MSG* msg, bool right) {
+    if (GetMessageExtraInfo() == (LPARAM)kInjectedMarker) {
+        return false;  // a held click, handed back to the application
+    }
     // A fresh press means a release we were still waiting to swallow is not
     // coming: a drag cancelled with Esc can leave the cursor outside the
     // window it started on, and the release then goes somewhere else. Same

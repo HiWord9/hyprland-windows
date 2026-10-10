@@ -122,8 +122,10 @@ void Wh_ModBeforeUninit() {
     // still there.
     UnfadeDraggedWindows();
 
-    // Take our hook procedures out before the DLL goes away.
+    // Take our hook procedures out before the DLL goes away, and give content
+    // a press was going through its region back.
     RemoveMessageHooks();
+    RestoreAllUncovered();
     ShutdownKeyboardServer();
     ShutdownDesktopThread();
 

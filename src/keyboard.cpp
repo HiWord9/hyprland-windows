@@ -34,6 +34,9 @@
 // the thread watches the Win key itself: a mask whose press is over comes
 // down, whether or not the release ever reached the hook.
 //
+// Wherever its keyboard hook stays, the thread runs a low-level mouse hook as
+// well, for the presses no message hook gets to see (mouse.cpp).
+//
 // The same hook also sees the key bindings before Windows does, so that one
 // can take over a shortcut of Windows' own, such as Win+W (hotkey.cpp). For
 // that it stays in place for good in the shell. Keys typed into an elevated
@@ -58,6 +61,7 @@ DWORD g_serverThreadId;
 
 // Only ever touched on the server thread.
 HHOOK g_keyboardHook;
+HHOOK g_mouseHook;
 // The hook stays even with no mask armed: in the shell, and in an elevated
 // process while one of its windows is in front.
 bool g_keepKeyboardHook;
@@ -178,6 +182,27 @@ void UpdateKeyboardHook() {
     } else if (!wanted && g_keyboardHook) {
         UnhookWindowsHookEx(g_keyboardHook);
         g_keyboardHook = nullptr;
+    }
+
+    // And the mouse hook (mouse.cpp) where the keyboard one stays for good:
+    // the shell, and an elevated process while a window of its own is in
+    // front - the presses on its windows are kept from the shell's hook. One
+    // with content the message hook cannot see keeps it in the background
+    // too, so that a press there finds it. Not every elevated process at all
+    // times: each low-level hook is a stop every move of the mouse makes.
+    bool mouseWanted =
+        !g_uninitializing &&
+        (g_keepKeyboardHook ||
+         (IsElevatedProcess() && HasCompositionContentWindow()));
+    if (mouseWanted && !g_mouseHook) {
+        g_mouseHook =
+            SetWindowsHookExW(WH_MOUSE_LL, LowLevelMouseProc, nullptr, 0);
+        if (!g_mouseHook) {
+            Wh_Log(L"WH_MOUSE_LL hook failed (%u)", GetLastError());
+        }
+    } else if (!mouseWanted && g_mouseHook) {
+        UnhookWindowsHookEx(g_mouseHook);
+        g_mouseHook = nullptr;
     }
 }
 
