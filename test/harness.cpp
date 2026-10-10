@@ -1644,6 +1644,25 @@ static void TestWinMask() {
           "and left alone when it is for Win");
     g_winMaskArmed = g_maskWin = g_maskAlt = false;
 
+    // A modifier held through a drag repeats into nothing while a button is
+    // down - only the ones a drag is done with.
+    UINT savedKeepAspect = g_settings.keepAspectVk;
+    UINT savedSnapKey = g_settings.snapModifierVk;
+    g_settings.keepAspectVk = VK_SHIFT;
+    g_settings.snapModifierVk = VK_CONTROL;
+    CHECK(IsDragKey(VK_LWIN) && IsDragKey(VK_RSHIFT) &&
+              IsDragKey(VK_LCONTROL) && !IsDragKey(VK_LMENU) &&
+              !IsDragKey('A'),
+          "the keys a drag is done with: Win, Shift and Ctrl by default");
+    g_settings.dragModifier = DragModifier::Alt;
+    g_settings.snapModifierVk = 0;
+    CHECK(IsDragKey(VK_RMENU) && !IsDragKey(VK_RWIN) &&
+              !IsDragKey(VK_RCONTROL),
+          "and with Alt as the modifier and no magnet key, Alt and Shift");
+    g_settings.dragModifier = DragModifier::Win;
+    g_settings.keepAspectVk = savedKeepAspect;
+    g_settings.snapModifierVk = savedSnapKey;
+
     ShutdownKeyboardServer();
     for (int i = 0; i < 40 && IsWindow(server); i++) {
         Sleep(25);
