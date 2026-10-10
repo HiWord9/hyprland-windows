@@ -1622,13 +1622,27 @@ static void TestWinMask() {
 
     // Another mask got to the release first, which is what a Win key-up of
     // our own looks like: stand down with it.
-    g_winMaskArmed = true;
+    g_winMaskArmed = g_maskWin = true;
     KBDLLHOOKSTRUCT ours{};
     ours.vkCode = VK_LWIN;
     ours.dwExtraInfo = kInjectedMarker;
     LRESULT passed = LowLevelKeyboardProc(HC_ACTION, WM_KEYUP, (LPARAM)&ours);
     CHECK(passed == 0 && !g_winMaskArmed,
           "a release another mask made stands this one down");
+
+    // With Alt as the modifier, its lone tap is the window's menu, or a XAML
+    // app's access keys: the same mask goes in ahead of its release.
+    g_winMaskArmed = g_maskAlt = true;
+    KBDLLHOOKSTRUCT altUp{};
+    altUp.vkCode = VK_LMENU;
+    passed = LowLevelKeyboardProc(HC_ACTION, WM_SYSKEYUP, (LPARAM)&altUp);
+    CHECK(passed == 1 && !g_winMaskArmed && !g_maskAlt,
+          "an Alt release is masked when the mask is for Alt");
+    g_winMaskArmed = g_maskWin = true;
+    passed = LowLevelKeyboardProc(HC_ACTION, WM_SYSKEYUP, (LPARAM)&altUp);
+    CHECK(passed == 0 && g_winMaskArmed,
+          "and left alone when it is for Win");
+    g_winMaskArmed = g_maskWin = g_maskAlt = false;
 
     ShutdownKeyboardServer();
     for (int i = 0; i < 40 && IsWindow(server); i++) {

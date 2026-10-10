@@ -271,7 +271,7 @@ constexpr WORD kMaskVk = 0xE8;  // unassigned VK, only used as "a key was hit"
 // own low-level hook lets them through.
 constexpr ULONG_PTR kInjectedMarker = 0x48797072;  // 'Hypr'
 
-void ArmWinMask(bool usingWin);
+void ArmWinMask(bool usingWin, bool usingAlt = false);
 void MaskModifierTap();
 bool WinKeyDown();
 bool IsShellProcess();
