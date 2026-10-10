@@ -78,6 +78,41 @@ bool AltKeyDown() {
     return (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
 }
 
+// A modifier held through a drag repeats, and every repeat in the window's
+// queue keeps the mouse moves on either side of it from merging into one: a
+// window slow to resize then takes a step for every move the mouse made, and
+// catches up long after it has stopped. Nothing does anything with a repeated
+// modifier, so the repeats of the ones a drag is done with go while a mouse
+// button is held. A repeat is a press of a key that is down already - this
+// hook is called before Windows has taken the press in.
+bool IsDragKey(DWORD vk) {
+    UINT keepAspect = g_settings.keepAspectVk;
+    UINT snap = g_settings.snapModifierVk;
+    switch (vk) {
+        case VK_LWIN:
+        case VK_RWIN:
+            return g_settings.dragModifier == DragModifier::Win;
+        case VK_LMENU:
+        case VK_RMENU:
+            return g_settings.dragModifier == DragModifier::Alt ||
+                   keepAspect == VK_MENU || snap == VK_MENU;
+        case VK_LCONTROL:
+        case VK_RCONTROL:
+            return keepAspect == VK_CONTROL || snap == VK_CONTROL;
+        case VK_LSHIFT:
+        case VK_RSHIFT:
+            return keepAspect == VK_SHIFT || snap == VK_SHIFT;
+    }
+    return false;
+}
+
+bool IsModifierRepeatDuringPress(DWORD vk) {
+    return IsDragKey(vk) && (GetAsyncKeyState(vk) & 0x8000) &&
+           ((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON) |
+             GetAsyncKeyState(VK_MBUTTON)) &
+            0x8000);
+}
+
 LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
     ModRef ref;  // the image must not go away under this procedure
 
@@ -87,6 +122,9 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
     auto* info = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
     bool keyUp = wParam == WM_KEYUP || wParam == WM_SYSKEYUP;
     bool ours = info->dwExtraInfo == kInjectedMarker;
+    if (!ours && !keyUp && IsModifierRepeatDuringPress(info->vkCode)) {
+        return 1;
+    }
     if (!ours && !keyUp) {
         BringDesktopForwardForKey(info->vkCode);
     }
