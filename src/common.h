@@ -143,6 +143,7 @@ struct Settings {
     std::atomic<bool> borderFramelessOnly{false};
     std::atomic<int> borderFadeDuration{kDefaultBorderFade};
     std::atomic<bool> desktopWinTab{true};
+    std::atomic<bool> desktopToEmpty{true};  // with nowhere to go
     std::atomic<int> corners{DWMWCP_DEFAULT};
     std::atomic<SnapMode> snap{SnapMode::Both};
     std::atomic<int> snapDistance{kDefaultSnapDistance};

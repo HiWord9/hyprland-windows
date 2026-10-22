@@ -30,7 +30,9 @@
 //
 // Task View and the Alt+Tab switcher are left alone while they are up: a
 // Win+Tab then goes to Windows, which closes Task View for it. With no other
-// desktop to go to, Win+Tab opens Task View, as in Windows.
+// desktop that has windows, Win+Tab goes to an empty one - made first, when
+// there is only the one - the way Hyprland makes a workspace by going to it;
+// or, as the settings may have it, opens Task View, as in Windows.
 #include "common.h"
 
 // Set by the desktop thread once the shell has said it has no desktop manager
@@ -46,23 +48,28 @@ const CLSID CLSID_VirtualDesktopManagerInternal = {
     0xC5E0CDCA, 0x7B6E, 0x41B2, {0x9F, 0xC4, 0xD9, 0x39, 0x75, 0xCC, 0x46, 0x7B}};
 
 // The builds whose desktop manager has GetCurrentDesktop, GetDesktops and
-// SwitchDesktop in slots 6, 7 and 9, and a desktop with GetId in slot 4. The
-// Windows 11 21H2 and Server 2022 ones take a monitor as well, and are left
-// to Windows.
+// SwitchDesktop in slots 6, 7 and 9, and a desktop with GetId in slot 4.
+// CreateDesktop comes after SwitchDesktop, one further on where 24H2 has put
+// SwitchDesktopAndMoveForegroundView in between. The Windows 11 21H2 and
+// Server 2022 ones take a monitor as well, and are left to Windows.
 struct DesktopManagerLayout {
     IID manager;
     IID desktop;
+    int createSlot;
 };
 const DesktopManagerLayout kLayouts[] = {
     // Windows 11 24H2 and later
     {{0x53F5CA0B, 0x158F, 0x4124, {0x90, 0x0C, 0x05, 0x71, 0x58, 0x06, 0x0B, 0x27}},
-     {0x3F07F4BE, 0xB107, 0x441A, {0xAF, 0x0F, 0x39, 0xD8, 0x25, 0x29, 0x07, 0x2C}}},
+     {0x3F07F4BE, 0xB107, 0x441A, {0xAF, 0x0F, 0x39, 0xD8, 0x25, 0x29, 0x07, 0x2C}},
+     11},
     // Windows 11 22H2 and 23H2
     {{0xA3175F2D, 0x239C, 0x4BD2, {0x8A, 0xA0, 0xEE, 0xBA, 0x8B, 0x0B, 0x13, 0x8E}},
-     {0x3F07F4BE, 0xB107, 0x441A, {0xAF, 0x0F, 0x39, 0xD8, 0x25, 0x29, 0x07, 0x2C}}},
+     {0x3F07F4BE, 0xB107, 0x441A, {0xAF, 0x0F, 0x39, 0xD8, 0x25, 0x29, 0x07, 0x2C}},
+     10},
     // Windows 10
     {{0xF31574D6, 0xB682, 0x4CDC, {0xBD, 0x56, 0x18, 0x27, 0x86, 0x0A, 0xBE, 0xC6}},
-     {0xFF72FFDD, 0xBE7E, 0x43FC, {0x9C, 0x03, 0xAD, 0x81, 0x68, 0x1E, 0x88, 0xE4}}},
+     {0xFF72FFDD, 0xBE7E, 0x43FC, {0x9C, 0x03, 0xAD, 0x81, 0x68, 0x1E, 0x88, 0xE4}},
+     10},
 };
 constexpr int kGetIdSlot = 4;
 constexpr int kGetCurrentDesktopSlot = 6;
@@ -413,6 +420,31 @@ Target FindTarget(int steps, Desktops* desktops, int* target) {
     return *target != stops[here] ? Target::kFound : Target::kNone;
 }
 
+// With nowhere to go: the desktop next to this one, `steps` stops round,
+// windows or not - or, with only the one there is, a new one, at the end.
+bool FindEmptyTarget(int steps, Desktops* desktops, int* target) {
+    int count = (int)desktops->ids.size();
+    if (count > 1) {
+        int here = (int)(std::find(desktops->ids.begin(), desktops->ids.end(),
+                                   desktops->current) -
+                         desktops->ids.begin());
+        *target = ((here + steps) % count + count) % count;
+        return true;
+    }
+    using Create = HRESULT(STDMETHODCALLTYPE*)(void*, IUnknown**);
+    IUnknown* made = nullptr;
+    HRESULT hr = Slot<Create>(g_internalManager, g_layout->createSlot)(
+        g_internalManager, &made);
+    if (FAILED(hr) || !made) {
+        Wh_Log(L"CreateDesktop failed (0x%08X)", hr);
+        return false;
+    }
+    desktops->ids.push_back(DesktopIdOf(made));
+    desktops->objects.push_back(made);
+    *target = count;
+    return true;
+}
+
 // Task View, opened - or closed, when it is up - the way its shortcut does it.
 void ToggleTaskView() {
     ShellExecuteW(nullptr, L"open",
@@ -428,11 +460,16 @@ void StepDesktop(int steps) {
     int target = -1;
     Target found = FindTarget(steps, &desktops, &target);
     if (found == Target::kNowhere) {
-        // No other desktop has windows: Win+Tab is what it is in Windows.
-        ToggleTaskView();
-        return;
-    }
-    if (found != Target::kFound) {
+        // No other desktop has windows: an empty one, or Win+Tab is what it
+        // is in Windows.
+        if (!g_settings.desktopToEmpty) {
+            ToggleTaskView();
+            return;
+        }
+        if (!FindEmptyTarget(steps, &desktops, &target)) {
+            return;
+        }
+    } else if (found != Target::kFound) {
         return;
     }
     if (!HoldFront()) {
@@ -573,13 +610,15 @@ bool SeveralDesktops() {
 
 // Called for every WM_HOTKEY a thread of this process retrieves: the shell's
 // Win+Tab, posted to one of its own, goes to the desktop thread instead - but
-// with only the one desktop it is left to the shell, as Task View.
+// with only the one desktop, and none to be made, it is left to the shell, as
+// Task View.
 // Returns true if it was taken.
 bool HandleDesktopHotkey(const MSG* msg) {
     DWORD threadId = g_desktopThreadId;
     if (!threadId || LOWORD(msg->lParam) != MOD_WIN ||
         HIWORD(msg->lParam) != VK_TAB || !g_settings.desktopWinTab ||
-        g_desktopSwitchUnsupported || ShellViewUp() || !SeveralDesktops()) {
+        g_desktopSwitchUnsupported || ShellViewUp() ||
+        !(g_settings.desktopToEmpty || SeveralDesktops())) {
         return false;
     }
     return PostThreadMessageW(threadId, kDesktopStepMessage, 1, 0) != FALSE;
