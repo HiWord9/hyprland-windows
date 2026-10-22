@@ -1490,6 +1490,34 @@ static void TestMoveResize() {
     CHECK(GetWindowRgn(content, region) == ERROR,
           "and the content has its region back");
     DeleteObject(region);
+
+    // Content on content, as File Explorer's title bar lies on its tabs: the
+    // hole goes through both, or the press would only reach the one below.
+    HWND bar = CreateWindowExW(
+        WS_EX_NOREDIRECTIONBITMAP, contentClass.lpszClassName, nullptr,
+        WS_CHILD | WS_VISIBLE, 0, 0, client.right, client.bottom, hwnd,
+        nullptr, GetModuleHandleW(nullptr), nullptr);
+    putBack();
+    RECT barRect;
+    GetWindowRect(bar, &barRect);
+    SetCursorPos((barRect.left + barRect.right) / 2,
+                 (barRect.top + barRect.bottom) / 2);
+    MSG uncover{};
+    uncover.time = GetTickCount();  // no button: nothing is pressed again
+    UncoverAndPress(hwnd, &uncover);
+    HRGN barHole = CreateRectRgn(0, 0, 0, 0);
+    HRGN contentHole = CreateRectRgn(0, 0, 0, 0);
+    CHECK(GetWindowRgn(bar, barHole) != ERROR &&
+              GetWindowRgn(content, contentHole) != ERROR,
+          "with content on content, the hole goes through both");
+    RestoreUncovered();
+    CHECK(GetWindowRgn(bar, barHole) == ERROR &&
+              GetWindowRgn(content, contentHole) == ERROR,
+          "and both have their regions back");
+    DeleteObject(barHole);
+    DeleteObject(contentHole);
+    DestroyWindow(bar);
+
     g_settings.modifierClick = ModifierClick::App;
     contentClicks = 0;
     moved = modifierPress(POINT{0, 0});
