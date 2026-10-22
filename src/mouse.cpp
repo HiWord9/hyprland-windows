@@ -218,6 +218,50 @@ void RestoreUncoveredAfterReplay() {
     }
 }
 
+struct LayerSearch {
+    POINT pt;
+    std::vector<HWND> layers;
+};
+
+BOOL CALLBACK FindLayerProc(HWND child, LPARAM lParam) {
+    auto* search = reinterpret_cast<LayerSearch*>(lParam);
+    RECT rc;
+    if (IsWindowVisible(child) && IsCompositionContent(child) &&
+        GetWindowRect(child, &rc) && PtInRect(&rc, search->pt)) {
+        search->layers.push_back(child);
+    }
+    return TRUE;
+}
+
+// Under g_uncoveredMutex.
+bool OpenHole(HWND content, POINT pt) {
+    RECT rc;
+    GetWindowRect(content, &rc);
+    HRGN saved = CreateRectRgn(0, 0, 0, 0);
+    if (GetWindowRgn(content, saved) == ERROR) {
+        DeleteObject(saved);
+        saved = nullptr;
+    }
+    HRGN region = CreateRectRgn(0, 0, rc.right - rc.left, rc.bottom - rc.top);
+    if (saved) {
+        CombineRgn(region, saved, nullptr, RGN_COPY);
+    }
+    int x = pt.x - rc.left, y = pt.y - rc.top;
+    HRGN hole = CreateRectRgn(x - kHoleHalf, y - kHoleHalf, x + kHoleHalf + 1,
+                              y + kHoleHalf + 1);
+    CombineRgn(region, region, hole, RGN_DIFF);
+    DeleteObject(hole);
+    if (!SetWindowRgn(content, region, FALSE)) {
+        DeleteObject(region);
+        if (saved) {
+            DeleteObject(saved);
+        }
+        return false;
+    }
+    g_uncovered.push_back({content, saved, GetCurrentThreadId()});
+    return true;
+}
+
 void UncoverAndPress(HWND root, const MSG* msg) {
     RestoreUncovered();
     // A window too busy to get to it in time doesn't press long after the
@@ -233,25 +277,13 @@ void UncoverAndPress(HWND root, const MSG* msg) {
     GetCursorPos(&pt);
     HWND content = CompositionContentAt(WindowFromPoint(pt), pt);
     if (content && GetAncestor(content, GA_ROOT) == root) {
-        RECT rc;
-        GetWindowRect(content, &rc);
-        HRGN saved = CreateRectRgn(0, 0, 0, 0);
-        if (GetWindowRgn(content, saved) == ERROR) {
-            DeleteObject(saved);
-            saved = nullptr;
-        }
-        HRGN region =
-            CreateRectRgn(0, 0, rc.right - rc.left, rc.bottom - rc.top);
-        if (saved) {
-            CombineRgn(region, saved, nullptr, RGN_COPY);
-        }
-        int x = pt.x - rc.left, y = pt.y - rc.top;
-        HRGN hole = CreateRectRgn(x - kHoleHalf, y - kHoleHalf,
-                                  x + kHoleHalf + 1, y + kHoleHalf + 1);
-        CombineRgn(region, region, hole, RGN_DIFF);
-        DeleteObject(hole);
+        // Such content can lie on more of it - File Explorer's title bar on
+        // its tabs: the hole goes through every layer at the point, or the
+        // press would only find the next one down.
+        LayerSearch search{pt, {}};
+        EnumChildWindows(root, FindLayerProc, (LPARAM)&search);
 
-        // The patch on the screen first, then the hole under it.
+        // The patch on the screen first, then the holes under it.
         HWND patch = ShowPatch(pt);
         if (patch) {
             DwmFlush();
@@ -259,14 +291,9 @@ void UncoverAndPress(HWND root, const MSG* msg) {
         std::lock_guard<std::mutex> lock(g_uncoveredMutex);
         // Once the teardown has closed everything there was, nothing new is
         // opened for it to miss: the press goes in as it is.
-        bool opened = !g_uninitializing && SetWindowRgn(content, region, FALSE);
-        if (opened) {
-            g_uncovered.push_back({content, saved, GetCurrentThreadId()});
-        } else {
-            DeleteObject(region);
-            if (saved) {
-                DeleteObject(saved);
-            }
+        bool opened = false;
+        for (HWND layer : search.layers) {
+            opened |= !g_uninitializing && OpenHole(layer, pt);
         }
         if (patch && opened) {
             g_patches.push_back({patch, GetCurrentThreadId()});
