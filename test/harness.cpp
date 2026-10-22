@@ -2050,6 +2050,70 @@ static void TestDesktops(bool noInput) {
     MSG winTab = WinTabHotkey();
     CHECK(!HandleDesktopHotkey(&winTab),
           "with no desktop thread, Win+Tab is left to the shell");
+    // With nowhere to go, an empty desktop: the one next to this, or a new
+    // one - made here, and taken away again. On a thread of its own, as the
+    // desktop thread's, before that thread is up to share the manager with.
+    std::thread([] {
+        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        if (!ConnectDesktopManagers()) {
+            printf("  (no desktop manager the mod knows - empty desktops not "
+                   "checked)\n");
+            CoUninitialize();
+            return;
+        }
+        Desktops desktops;
+        int target = -1;
+        if (ReadDesktops(&desktops) && desktops.ids.size() > 1) {
+            int count = (int)desktops.ids.size();
+            int here = (int)(std::find(desktops.ids.begin(), desktops.ids.end(),
+                                       desktops.current) -
+                             desktops.ids.begin());
+            CHECK(FindEmptyTarget(-1, &desktops, &target) &&
+                      target == (here + count - 1) % count,
+                  "with nowhere to go, it is the desktop next to this one");
+        }
+        Desktops alone;
+        if (ReadDesktops(&alone)) {
+            // As if this were the only one.
+            for (size_t i = 1; i < alone.objects.size(); i++) {
+                alone.objects[i]->Release();
+            }
+            alone.objects.resize(1);
+            alone.ids.resize(1);
+            size_t before = alone.ids.size();
+            Desktops all;
+            ReadDesktops(&all);
+            size_t had = all.ids.size();
+            bool made = FindEmptyTarget(1, &alone, &target);
+            Desktops now;
+            ReadDesktops(&now);
+            CHECK(made && target == (int)before && now.ids.size() == had + 1 &&
+                      now.ids.back() == alone.ids.back(),
+                  "and with only the one, a new desktop, at the end");
+            if (made) {
+                // RemoveDesktop, two on from CreateDesktop - one on, in
+                // Windows 10's.
+                int removeSlot =
+                    g_layout->createSlot + (g_layout == &kLayouts[2] ? 1 : 2);
+                using Remove =
+                    HRESULT(STDMETHODCALLTYPE*)(void*, IUnknown*, IUnknown*);
+                IUnknown* current = nullptr;
+                for (size_t i = 0; i < now.ids.size(); i++) {
+                    if (now.ids[i] == now.current) {
+                        current = now.objects[i];
+                    }
+                }
+                Slot<Remove>(g_internalManager, removeSlot)(
+                    g_internalManager, alone.objects.back(), current);
+                Desktops after;
+                ReadDesktops(&after);
+                CHECK(after.ids.size() == had, "and it is taken away again");
+            }
+        }
+        ReleaseDesktopManagers();
+        CoUninitialize();
+    }).join();
+
     // The harness stands in for the shell: the desktop thread runs here, and
     // the shell's Win+Tab is handed to it the way the shell's thread does.
     StartDesktopThread();

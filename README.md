@@ -19,7 +19,9 @@ Window handling the way [Hyprland](https://hypr.land/) does it, on Windows.
 * **Ctrl+Alt+H** — hide the focused window's title bar; press it again to bring
   the title bar back.
 * **Win+Tab** — go to the next virtual desktop that has windows on it, at once;
-  Win+Shift+Tab goes back. Task View moves to Win+Ctrl+Tab.
+  Win+Shift+Tab goes back. With no other one that has windows, it goes to an
+  empty desktop - a new one, if there is no other desktop at all. Task View
+  moves to Win+Ctrl+Tab.
 
 Moving and resizing feel like the real thing: windows still snap to the screen
 edges, dragging one to the top still offers the Windows 11 snap layouts, and
@@ -68,8 +70,7 @@ the title bar.
   other choices.
 * Win+Tab switches desktops through a part of Windows that Microsoft doesn't
   publish. It is known for Windows 10 and for Windows 11 from 22H2 on; on a
-  build the mod doesn't recognize, and with only the one desktop, Win+Tab stays
-  Task View.
+  build the mod doesn't recognize, Win+Tab stays Task View.
 * The hotkey, and a window shortcut that is a key, are taken everywhere: a
   program that uses the same keys for something of its own doesn't get them
   while the mod is on. Pick other keys in the settings if one does.
