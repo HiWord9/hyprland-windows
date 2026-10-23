@@ -144,6 +144,7 @@ input.
 .\test\harness.exe --no-input      # skip the mouse-input tests
 .\test\harness.exe --dpi-unaware   # run as a DPI-unaware process
 .\test\harness.exe --desktops      # only the Win+Tab tests
+.\test\harness.exe --new-desktop   # also make a desktop, and take it away again
 ```
 
 What Win+Tab does is decided by the shell as much as by the mod, and a

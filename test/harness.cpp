@@ -2,10 +2,12 @@
 // is covered too) with Windhawk's WH_EDITING stubs and exercises it against
 // real windows on the desktop. Run build.ps1, which bundles first.
 //
-// Usage: harness.exe [--dpi-unaware] [--no-input] [--desktops]
+// Usage: harness.exe [--dpi-unaware] [--no-input] [--desktops] [--new-desktop]
 //   --dpi-unaware   don't opt into per-monitor DPI awareness
 //   --no-input      skip the tests that inject mouse input
 //   --desktops      only the Win+Tab tests
+//   --new-desktop   with them, make a desktop and take it away again - once
+//                   followed by the shell's Task View crashing
 #include "../build/hyprland-windows.wh.cpp"
 
 #include <dwmapi.h>
@@ -2040,6 +2042,8 @@ static void NotCheckedForElevated(const char* what) {
            "keys from the harness: %s)\n", what);
 }
 
+static bool g_makeDesktop;  // --new-desktop
+
 static void TestDesktops(bool noInput) {
     printf("\n== Win+Tab through the virtual desktops ==\n");
     if (noInput) {
@@ -2073,7 +2077,9 @@ static void TestDesktops(bool noInput) {
                   "with nowhere to go, it is the desktop next to this one");
         }
         Desktops alone;
-        if (ReadDesktops(&alone)) {
+        if (!g_makeDesktop) {
+            printf("  (making a desktop not checked - --new-desktop does)\n");
+        } else if (ReadDesktops(&alone)) {
             // As if this were the only one.
             for (size_t i = 1; i < alone.objects.size(); i++) {
                 alone.objects[i]->Release();
@@ -3095,6 +3101,7 @@ int main(int argc, char** argv) {
         if (!strcmp(argv[i], "--dpi-unaware")) dpiUnaware = true;
         if (!strcmp(argv[i], "--no-input")) noInput = true;
         if (!strcmp(argv[i], "--desktops")) onlyDesktops = true;
+        if (!strcmp(argv[i], "--new-desktop")) g_makeDesktop = true;
     }
     if (!dpiUnaware) {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
