@@ -23,6 +23,7 @@ Window handling the way Hyprland does it, on Windows.
   its title bar.
 * **Win + right mouse button** - resize a window from anywhere on it, from
   whichever corner is closest to the cursor.
+* **Win + mouse wheel** - make a window larger or smaller, around its center.
 * **Win + double click** - maximize a window, or restore it. The title bar is
   gone, so the double click that used to be on it now works anywhere on the
   window; the settings offer other things for it to do.
@@ -132,6 +133,22 @@ feedback is welcome.
     - auto: Goes to the app with Alt, grabs the window with Win
     - app: Goes to the app
     - window: Grabs the window
+  - wheel: true
+    $name: Modifier + mouse wheel
+    $description: >-
+      Turning the wheel over a window with the modifier key held makes it
+      larger or smaller, around its center
+  - wheelStep: 10
+    $name: Mouse wheel step
+    $description: How much larger or smaller each notch makes the window, in percent
+  - wheelWhileMoving: cursor
+    $name: Mouse wheel while moving
+    $description: >-
+      What a window being dragged grows and shrinks around. Otherwise it is
+      always its center.
+    $options:
+    - cursor: The point the cursor holds it by, which stays under the cursor
+    - center: Its center
   $name: Moving and resizing
 - snap:
   - mode: both

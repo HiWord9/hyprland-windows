@@ -236,3 +236,101 @@ bool IsDoubleClickAt(HWND root, POINT pt, DWORD tick) {
     g_lastPressTick = together ? 0 : tick;
     return together;
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// The modifier and the wheel: the window grows or shrinks around its center
+
+bool CanScale(HWND root) {
+    return IsFrameWindow(root) && !IsZoomed(root) && !IsIconic(root);
+}
+
+// Where the steps so far have taken the window, unrounded. The window itself
+// only ever has whole pixels, and a step started from them would let the
+// rounding creep: off the center, and to a size a notch back does not undo.
+// Good for as long as the window is where the last step put it.
+struct ScaleState {
+    HWND hwnd;
+    RECT applied;  // the frame that step left
+    double centerX, centerY, width, height;
+};
+thread_local ScaleState g_scale;
+
+// On the window's own thread. By the step for every notch, either way the
+// same, so that a notch up and one down come back to where they began - and
+// as far as the window lets itself be sized, and no larger than its monitor's
+// work area, which a window keeps its shape by stopping at.
+void ScaleWindow(HWND root, int wheelDelta) {
+    if (!wheelDelta || !CanScale(root)) {
+        return;
+    }
+    RECT window, frame;
+    GetWindowRect(root, &window);
+    // The visible frame is what gets centered and fitted: the invisible
+    // borders around it are the window's, whatever its size.
+    if (FAILED(DwmGetWindowAttribute(root, DWMWA_EXTENDED_FRAME_BOUNDS, &frame,
+                                     sizeof(frame)))) {
+        frame = window;
+    }
+    int frameW = frame.right - frame.left, frameH = frame.bottom - frame.top;
+    int extraW = (window.right - window.left) - frameW;
+    int extraH = (window.bottom - window.top) - frameH;
+    if (frameW <= 0 || frameH <= 0) {
+        return;
+    }
+    if (g_scale.hwnd != root || !EqualRect(&g_scale.applied, &frame)) {
+        g_scale = {root, frame, (frame.left + frame.right) / 2.0,
+                   (frame.top + frame.bottom) / 2.0, (double)frameW,
+                   (double)frameH};
+    }
+
+    MINMAXINFO limits{};
+    limits.ptMinTrackSize = {GetSystemMetrics(SM_CXMINTRACK),
+                             GetSystemMetrics(SM_CYMINTRACK)};
+    limits.ptMaxTrackSize = {GetSystemMetrics(SM_CXMAXTRACK),
+                             GetSystemMetrics(SM_CYMAXTRACK)};
+    SendMessageW(root, WM_GETMINMAXINFO, 0, (LPARAM)&limits);
+    MONITORINFO monitor{sizeof(monitor)};
+    GetMonitorInfoW(MonitorFromWindow(root, MONITOR_DEFAULTTONEAREST), &monitor);
+    const RECT& work = monitor.rcWork;
+
+    double factor = pow(1 + g_settings.wheelStep / 100.0,
+                        (double)wheelDelta / WHEEL_DELTA);
+    double most = std::min(
+        {(work.right - work.left) / g_scale.width,
+         (work.bottom - work.top) / g_scale.height,
+         (limits.ptMaxTrackSize.x - extraW) / g_scale.width,
+         (limits.ptMaxTrackSize.y - extraH) / g_scale.height});
+    double least = std::max((limits.ptMinTrackSize.x - extraW) / g_scale.width,
+                            (limits.ptMinTrackSize.y - extraH) / g_scale.height);
+    // Only ever towards a limit: a window already past one is not made to
+    // jump to it, the other way.
+    if (factor > 1) {
+        factor = std::min(factor, std::max(most, 1.0));
+    } else {
+        factor = std::max(factor, std::min(least, 1.0));
+    }
+    if (factor == 1) {
+        return;
+    }
+    if (IsInMoveSizeLoop()) {
+        // Mid-move, the loop would put the window back to the size it
+        // started with at the next move of the mouse: the size goes to the
+        // drag's subclass, which keeps it up (snap.cpp). Mid-resize, the size
+        // is the cursor's.
+        ScaleDraggedWindow(root, factor);
+        return;
+    }
+    g_scale.width *= factor;
+    g_scale.height *= factor;
+    int width = (int)lround(g_scale.width), height = (int)lround(g_scale.height);
+    int left = (int)lround(g_scale.centerX - g_scale.width / 2);
+    int top = (int)lround(g_scale.centerY - g_scale.height / 2);
+    SetWindowPos(root, nullptr, left - (frame.left - window.left),
+                 top - (frame.top - window.top), width + extraW, height + extraH,
+                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER |
+                     SWP_NOCOPYBITS);
+    if (FAILED(DwmGetWindowAttribute(root, DWMWA_EXTENDED_FRAME_BOUNDS,
+                                     &g_scale.applied, sizeof(RECT)))) {
+        GetWindowRect(root, &g_scale.applied);
+    }
+}

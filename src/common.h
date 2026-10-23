@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdlib>
 #include <cwctype>
 #include <memory>
@@ -80,6 +81,8 @@ enum class MenuBarMode { Hide, KeepMenu, Skip };
 enum class WindowAction { None, ToggleMaximize, ToggleTitleBar, Close };
 // Which drags fade the window they are dragging.
 enum class DragTranslucency { Both, MoveOnly, Off };
+// What a window being moved grows and shrinks around, with the mouse wheel.
+enum class WheelAnchor { Cursor, Center };
 // Where a click with the modifier held goes when the mouse doesn't move.
 enum class ModifierClick { Auto, App, Window };
 // What a dragged window's edges are magnetic to.
@@ -98,6 +101,7 @@ constexpr COLORREF kColorAccent = 0xFFFFFFFC;
 constexpr int kDefaultDragOpacity = 85;
 constexpr int kDefaultDragFadeIn = 120;
 constexpr int kDefaultDragFadeOut = 60;
+constexpr int kDefaultWheelStep = 10;  // percent per notch
 
 // How long the border color takes to cross from one setting to the other when
 // focus moves.
@@ -134,6 +138,9 @@ struct Settings {
     std::atomic<int> dragOpacity{kDefaultDragOpacity};
     std::atomic<int> dragFadeIn{kDefaultDragFadeIn};
     std::atomic<int> dragFadeOut{kDefaultDragFadeOut};
+    std::atomic<bool> wheelScale{true};
+    std::atomic<int> wheelStep{kDefaultWheelStep};
+    std::atomic<WheelAnchor> wheelAnchor{WheelAnchor::Cursor};
     std::atomic<MenuBarMode> menuBarMode{MenuBarMode::Hide};
     std::atomic<bool> hideByDefault{false};
     std::atomic<COLORREF> borderActive{kColorUntouched};
@@ -168,6 +175,7 @@ COLORREF ParseBorderColor(PCWSTR raw);
 MenuBarMode ParseMenuBarMode(PCWSTR raw);
 int ParseCorners(PCWSTR raw);
 DragTranslucency ParseDragTranslucency(PCWSTR raw);
+WheelAnchor ParseWheelAnchor(PCWSTR raw);
 ModifierClick ParseModifierClick(PCWSTR raw);
 SnapMode ParseSnapMode(PCWSTR raw);
 bool ParseSnapModifierHold(PCWSTR raw);
@@ -315,6 +323,9 @@ enum DragKind : WPARAM {
     kDragUncover = 5,
     // And once that press has gone through: the window covers up again.
     kDragCover = 6,
+    // From the shell's mouse hook as well: the modifier held and the wheel
+    // turned over the window, by the wheel delta in lParam - see actions.cpp.
+    kDragScale = 7,
 };
 
 // How long the thread that ends a resize waits for its loop to start. The
@@ -371,6 +382,8 @@ int DoubleClickTimeMs();
 bool IsDoubleClickAt(HWND root, POINT pt, DWORD tick);
 bool TakeWindowAction(MSG* msg, WindowAction action);
 bool CanTakeAction(HWND root, WindowAction action);
+bool CanScale(HWND root);
+void ScaleWindow(HWND root, int wheelDelta);
 void RequestWindowAction(HWND root, WindowAction action);
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -381,6 +394,7 @@ bool SnapAllowedWith(bool modifierDown);
 bool SnapAllowed();
 void BeginDragSnap(HWND root, WPARAM kind, POINT pt);
 void EndDragSnap(HWND hwnd);
+bool ScaleDraggedWindow(HWND hwnd, double factor);
 std::vector<HWND> SnapshotSnappedWindows();
 
 ////////////////////////////////////////////////////////////////////////////////

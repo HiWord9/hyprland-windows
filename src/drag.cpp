@@ -443,6 +443,10 @@ bool ReplayHeldPress(MSG* msg, bool right) {
 ////////////////////////////////////////////////////////////////////////////////
 // The requests, and the presses that make them
 
+// Set while the requests to scale that are still waiting are taken out of
+// the queue: the message hook sees them go, and leaves them be.
+thread_local bool g_takingScaleSteps;
+
 bool HandleDragRequest(MSG* msg) {
     HWND root = msg->hwnd;
     POINT pt{GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam)};
@@ -458,6 +462,30 @@ bool HandleDragRequest(MSG* msg) {
     }
     if (msg->wParam == kDragUncover) {
         UncoverAndPress(root, msg);
+        return false;
+    }
+
+    if (msg->wParam == kDragScale) {
+        if (g_takingScaleSteps) {
+            return true;  // left as it is, for the loop below to add up
+        }
+        // The wheel turns notch by notch, and a window slow to resize would
+        // take them one at a time, long after the wheel has stopped: the
+        // notches already waiting go into the same step.
+        int delta = (int)msg->lParam;
+        MSG next;
+        g_takingScaleSteps = true;
+        while (PeekMessageW(&next, root, g_msgDrag, g_msgDrag,
+                            PM_NOREMOVE | PM_NOYIELD) &&
+               next.wParam == kDragScale &&
+               PeekMessageW(&next, root, g_msgDrag, g_msgDrag,
+                            PM_REMOVE | PM_NOYIELD)) {
+            delta += (int)next.lParam;
+        }
+        g_takingScaleSteps = false;
+        if (!g_uninitializing) {
+            ScaleWindow(root, delta);
+        }
         return false;
     }
 

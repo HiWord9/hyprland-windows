@@ -10,6 +10,7 @@ Window handling the way [Hyprland](https://hypr.land/) does it, on Windows.
   its title bar.
 * **Win + right mouse button** — resize a window from anywhere on it, from
   whichever corner is closest to the cursor.
+* **Win + mouse wheel** — make a window larger or smaller, around its center.
 * **Win + double click** — maximize a window, or restore it. The title bar is
   gone, so the double click that used to be on it now works anywhere on the
   window; the settings offer other things for it to do.

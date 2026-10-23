@@ -1,7 +1,8 @@
-// Magnetic edges while a window is being dragged, and the aspect ratio held
-// while it is being resized.
+// Magnetic edges while a window is being dragged, the aspect ratio held
+// while it is being resized, and the size the mouse wheel gives a window
+// while it is being moved.
 //
-// Both live in the same place: a subclass put on the window for the length of
+// All three live in the same place: a subclass put on the window for the length of
 // the drag, which edits the rectangle the system's loop is about to apply.
 // The loop hands it over as WM_MOVING / WM_SIZING - sent messages, which the
 // message hook never sees, so a subclass is the only way to them. It goes on
@@ -35,6 +36,11 @@ struct SnapState {
     RECT inset{};        // the visible frame minus the window rectangle
     std::vector<RECT> windows;   // the frames of the other windows
     std::vector<RECT> monitors;  // the work areas to snap to
+    // The frame size the wheel has given the window mid-move, unrounded - or
+    // none. The loop goes on with the size it started with otherwise.
+    double scaledWidth = 0, scaledHeight = 0;
+    // Where on that frame the cursor holds it, unrounded.
+    double holdX = 0, holdY = 0;
 };
 
 std::mutex g_snapMutex;
@@ -308,7 +314,9 @@ bool SnapAllowed() {
 }
 
 void AdjustMove(HWND hwnd, const SnapState& state, RECT* rc) {
-    if (!SnapAllowed()) {
+    bool snapping = g_settings.snap != SnapMode::Off && SnapAllowed();
+    bool scaled = state.scaledWidth > 0;
+    if (!snapping && !scaled) {
         return;  // nothing to add to the loop's own rectangle
     }
     // The loop's own proposal is thrown away: it works the position out from
@@ -320,6 +328,13 @@ void AdjustMove(HWND hwnd, const SnapState& state, RECT* rc) {
     }
     int width = rc->right - rc->left;
     int height = rc->bottom - rc->top;
+    if (scaled) {
+        // The frame's size plus the invisible border's.
+        width = (int)lround(state.scaledWidth) + state.inset.left -
+                state.inset.right;
+        height = (int)lround(state.scaledHeight) + state.inset.top -
+                 state.inset.bottom;
+    }
 
     POINT offset = state.grabOffset;
     if (state.grabSize.cx > 0 && state.grabSize.cy > 0 &&
@@ -337,8 +352,80 @@ void AdjustMove(HWND hwnd, const SnapState& state, RECT* rc) {
     window.bottom = window.top + height;
 
     RECT frame = WindowToFrame(window, state.inset);
-    SnapMovedFrame(state, SnapDistancePx(hwnd), &frame);
+    if (snapping) {
+        SnapMovedFrame(state, SnapDistancePx(hwnd), &frame);
+    }
     *rc = FrameToWindow(frame, state.inset);
+}
+
+// The wheel turned while the window is being moved: the window takes the new
+// size at once, and the loop with every step from now on. Around the point
+// the cursor holds it by, which stays under the cursor - or, as the settings
+// may have it, around its center.
+//
+// Where the cursor holds it is the drag's own grab offset, not where the
+// window is on the screen: the window is always a step of the loop behind
+// the cursor, and a hold worked out from it would take that lag in with
+// every notch, until the window had crept out from under the cursor.
+// Returns false if this is not a move of the mod's, which then has no size to
+// keep up.
+bool ScaleDraggedWindow(HWND hwnd, double factor) {
+    POINT cursor;
+    RECT window;
+    if (!GetCursorPos(&cursor) || !GetWindowRect(hwnd, &window)) {
+        return false;
+    }
+    RECT target;
+    {
+        std::lock_guard<std::mutex> lock(g_snapMutex);
+        auto it = g_snaps.find(hwnd);
+        if (it == g_snaps.end() || it->second.kind != kDragMove) {
+            return false;
+        }
+        SnapState& state = it->second;
+        const RECT& inset = state.inset;
+        if (state.scaledWidth <= 0) {
+            // The size the loop has given the window, and the offset at it -
+            // which the loop keeps in proportion when it changes the size, a
+            // maximized window being restored.
+            int width = window.right - window.left;
+            int height = window.bottom - window.top;
+            POINT offset = state.grabOffset;
+            if (state.grabSize.cx > 0 && state.grabSize.cy > 0) {
+                offset.x = MulDiv(offset.x, width, state.grabSize.cx);
+                offset.y = MulDiv(offset.y, height, state.grabSize.cy);
+            }
+            state.scaledWidth = width - inset.left + inset.right;
+            state.scaledHeight = height - inset.top + inset.bottom;
+            state.holdX = offset.x - inset.left;
+            state.holdY = offset.y - inset.top;
+        }
+        double width = state.scaledWidth * factor;
+        double height = state.scaledHeight * factor;
+        if (g_settings.wheelAnchor == WheelAnchor::Center) {
+            state.holdX += (width - state.scaledWidth) / 2;
+            state.holdY += (height - state.scaledHeight) / 2;
+        } else {
+            state.holdX *= factor;
+            state.holdY *= factor;
+        }
+        state.scaledWidth = width;
+        state.scaledHeight = height;
+
+        int left = cursor.x - (int)lround(state.holdX);
+        int top = cursor.y - (int)lround(state.holdY);
+        RECT frame{left, top, left + (int)lround(width),
+                   top + (int)lround(height)};
+        target = FrameToWindow(frame, inset);
+        state.grabOffset = POINT{cursor.x - target.left, cursor.y - target.top};
+        state.grabSize = SIZE{target.right - target.left,
+                              target.bottom - target.top};
+    }
+    SetWindowPos(hwnd, nullptr, target.left, target.top,
+                 target.right - target.left, target.bottom - target.top,
+                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER |
+                     SWP_NOCOPYBITS);
+    return true;
 }
 
 void AdjustSize(HWND hwnd, const SnapState& state, UINT edge, RECT* rc) {
@@ -434,6 +521,33 @@ LRESULT CALLBACK SnapSubclassProc(HWND hwnd,
             break;
         }
 
+        case WM_WINDOWPOSCHANGING: {
+            // The loop's last word, as the button comes up: its own
+            // rectangle, put in place without a WM_MOVING - at the size it
+            // started with, after a turn of the wheel with the mouse held
+            // still. It gets the one the moves would have had.
+            auto* pos = reinterpret_cast<WINDOWPOS*>(lParam);
+            if (pos->flags & SWP_NOSIZE) {
+                break;
+            }
+            std::lock_guard<std::mutex> lock(g_snapMutex);
+            auto it = g_snaps.find(hwnd);
+            if (it == g_snaps.end() || it->second.kind != kDragMove ||
+                it->second.scaledWidth <= 0 ||
+                (pos->cx == it->second.grabSize.cx &&
+                 pos->cy == it->second.grabSize.cy)) {
+                break;
+            }
+            RECT rc{pos->x, pos->y, pos->x + pos->cx, pos->y + pos->cy};
+            AdjustMove(hwnd, it->second, &rc);
+            pos->x = rc.left;
+            pos->y = rc.top;
+            pos->cx = rc.right - rc.left;
+            pos->cy = rc.bottom - rc.top;
+            pos->flags &= ~SWP_NOMOVE;
+            break;
+        }
+
         case WM_DPICHANGED: {
             // The invisible border is measured in pixels, and the window has
             // just changed how big a pixel is.
@@ -441,6 +555,9 @@ LRESULT CALLBACK SnapSubclassProc(HWND hwnd,
             auto it = g_snaps.find(hwnd);
             if (it != g_snaps.end()) {
                 it->second.inset = FrameInsetOf(hwnd);
+                // And the loop's own size for the new scale is the one to go
+                // on with.
+                it->second.scaledWidth = it->second.scaledHeight = 0;
             }
             break;
         }
@@ -476,9 +593,12 @@ std::vector<HWND> SnapshotSnappedWindows() {
 // Called from the drag request, on the window's own thread, once a move or
 // size loop is about to start.
 void BeginDragSnap(HWND root, WPARAM kind, POINT pt) {
+    // Every move gets the subclass, magnet or none: the wheel may yet give
+    // it a size to keep.
     bool wantSnap = g_settings.snap != SnapMode::Off;
     bool wantRatio = kind == kDragResize && g_settings.keepAspectVk != 0;
-    if (g_uninitializing || (!wantSnap && !wantRatio)) {
+    bool wantScale = kind == kDragMove && g_settings.wheelScale;
+    if (g_uninitializing || (!wantSnap && !wantRatio && !wantScale)) {
         return;
     }
 
