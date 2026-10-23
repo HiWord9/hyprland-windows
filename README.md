@@ -10,7 +10,8 @@ Window handling the way [Hyprland](https://hypr.land/) does it, on Windows.
   its title bar.
 * **Win + right mouse button** — resize a window from anywhere on it, from
   whichever corner is closest to the cursor.
-* **Win + mouse wheel** — make a window larger or smaller, around its center.
+* **Win + mouse wheel** — make a window larger or smaller, around its center;
+  two fingers on a touchpad do it too.
 * **Win + double click** — maximize a window, or restore it. The title bar is
   gone, so the double click that used to be on it now works anywhere on the
   window; the settings offer other things for it to do.
@@ -72,6 +73,9 @@ the title bar.
 * Win+Tab switches desktops through a part of Windows that Microsoft doesn't
   publish. It is known for Windows 10 and for Windows 11 from 22H2 on; on a
   build the mod doesn't recognize, Win+Tab stays Task View.
+* File Explorer scrolls with two fingers on a touchpad its own way, which the
+  mod has no say in: there, Win + two fingers scroll as they always do, and
+  the mouse wheel is what scales the window.
 * The hotkey, and a window shortcut that is a key, are taken everywhere: a
   program that uses the same keys for something of its own doesn't get them
   while the mod is on. Pick other keys in the settings if one does.

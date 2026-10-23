@@ -326,6 +326,9 @@ enum DragKind : WPARAM {
     // From the shell's mouse hook as well: the modifier held and the wheel
     // turned over the window, by the wheel delta in lParam - see actions.cpp.
     kDragScale = 7,
+    // Sent by the teardown: a subclass waiting for a touchpad's question,
+    // taken off - see mouse.cpp.
+    kDragUntouch = 8,
 };
 
 // How long the thread that ends a resize waits for its loop to start. The
@@ -336,6 +339,9 @@ constexpr int kMoveSizeStartWaitMs = 500;
 bool IsDragModifierDown();
 LRESULT CALLBACK LowLevelMouseProc(int code, WPARAM wParam, LPARAM lParam);
 bool HasCompositionContentWindow();
+bool TouchpadGoesToWheel(WPARAM pointerHitTest);
+void KeepTouchpadFromApp(HWND hwnd, WPARAM pointerHitTest);
+std::vector<HWND> SnapshotTouchpadWindows();
 void UncoverAndPress(HWND root, const MSG* msg);
 void RestoreUncoveredAfterReplay();
 void RestoreUncovered(bool allThreads = false);

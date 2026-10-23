@@ -172,6 +172,10 @@ LRESULT CALLBACK CallWndProc(int code, WPARAM wParam, LPARAM lParam) {
             case WM_NCDESTROY:
                 ForgetBorderColor(sent->hwnd);
                 break;
+            case DM_POINTERHITTEST:
+                // Two fingers on a touchpad, about to go to the app.
+                KeepTouchpadFromApp(sent->hwnd, sent->wParam);
+                break;
         }
     }
     return CallNextHookEx(nullptr, code, wParam, lParam);

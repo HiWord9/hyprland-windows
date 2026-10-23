@@ -384,6 +384,89 @@ void CALLBACK LateReleaseTimer(HWND, UINT, UINT_PTR id, DWORD) {
     SendInput(1, &input, sizeof(input));
 }
 
+// Two fingers on a touchpad, over a program that scrolls with them itself -
+// Chrome, Discord, Spotify: Windows asks the program first, with
+// DM_POINTERHITTEST, whether it takes the contact. With the modifier held,
+// and the wheel scaling windows, the program is not to hear the question, and
+// is left the wheel Windows makes of the gesture for a program that does not
+// take it - which the shell's mouse hook takes in turn (TakeWheel).
+//
+// The question is sent, not posted, so the message hook never sees it. What
+// does is the hook on sent messages, a moment before the window's procedure
+// is called: it puts a subclass of ours on the window for just that one
+// message, which answers it the way a window that does not take touchpads
+// does, and takes itself off again. File Explorer asks nothing of the kind:
+// it scrolls its touchpad gestures some other way, and goes on doing so.
+bool TouchpadGoesToWheel(WPARAM pointerHitTest) {
+    POINTER_INPUT_TYPE type;
+    return g_settings.wheelScale && IsDragModifierDown() &&
+           GetPointerType(GET_POINTERID_WPARAM(pointerHitTest), &type) &&
+           type == PT_TOUCHPAD;
+}
+
+constexpr UINT_PTR kTouchpadSubclassId = 0x48597074;  // 'Hypt'
+// The windows with that subclass on, for the teardown to take it off should
+// the message it waits for not have come.
+std::mutex g_touchpadMutex;
+std::vector<HWND> g_touchpadAsked;
+
+void EndKeepingTouchpad(HWND hwnd);
+
+LRESULT CALLBACK TouchpadSubclassProc(HWND hwnd,
+                                      UINT uMsg,
+                                      WPARAM wParam,
+                                      LPARAM lParam,
+                                      UINT_PTR,
+                                      DWORD_PTR) {
+    ModRef ref;  // the image must not go away under this procedure
+
+    if (uMsg == DM_POINTERHITTEST) {
+        EndKeepingTouchpad(hwnd);
+        if (TouchpadGoesToWheel(wParam)) {
+            return DefWindowProcW(hwnd, uMsg, wParam, lParam);
+        }
+    } else if (uMsg == WM_NCDESTROY) {
+        EndKeepingTouchpad(hwnd);
+    } else if (uMsg == g_msgDrag && wParam == kDragUntouch) {
+        EndKeepingTouchpad(hwnd);
+        return 0;
+    }
+    return DefSubclassProc(hwnd, uMsg, wParam, lParam);
+}
+
+void EndKeepingTouchpad(HWND hwnd) {
+    {
+        std::lock_guard<std::mutex> lock(g_touchpadMutex);
+        auto it = std::find(g_touchpadAsked.begin(), g_touchpadAsked.end(), hwnd);
+        if (it == g_touchpadAsked.end()) {
+            return;
+        }
+        g_touchpadAsked.erase(it);
+    }
+    RemoveWindowSubclass(hwnd, TouchpadSubclassProc, kTouchpadSubclassId);
+}
+
+// From the hook on sent messages, on the window's own thread.
+void KeepTouchpadFromApp(HWND hwnd, WPARAM pointerHitTest) {
+    if (g_uninitializing || !TouchpadGoesToWheel(pointerHitTest)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(g_touchpadMutex);
+    if (std::find(g_touchpadAsked.begin(), g_touchpadAsked.end(), hwnd) !=
+            g_touchpadAsked.end() ||
+        g_uninitializing) {
+        return;
+    }
+    if (SetWindowSubclass(hwnd, TouchpadSubclassProc, kTouchpadSubclassId, 0)) {
+        g_touchpadAsked.push_back(hwnd);
+    }
+}
+
+std::vector<HWND> SnapshotTouchpadWindows() {
+    std::lock_guard<std::mutex> lock(g_touchpadMutex);
+    return g_touchpadAsked;
+}
+
 // Only touched on the server thread: the window the wheel last went to.
 HWND g_wheelRoot;
 
