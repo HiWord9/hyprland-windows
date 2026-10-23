@@ -140,6 +140,9 @@ void Wh_ModBeforeUninit() {
     for (HWND hwnd : SnapshotSnappedWindows()) {
         SendTeardown(hwnd, g_msgDrag, kDragUnsnap);
     }
+    for (HWND hwnd : SnapshotTouchpadWindows()) {
+        SendTeardown(hwnd, g_msgDrag, kDragUntouch);
+    }
     for (HWND hwnd : SnapshotFramelessWindows()) {
         SendTeardown(hwnd, g_msgFrameless, kActionShow);
     }
