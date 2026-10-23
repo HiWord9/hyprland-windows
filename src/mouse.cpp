@@ -384,6 +384,49 @@ void CALLBACK LateReleaseTimer(HWND, UINT, UINT_PTR id, DWORD) {
     SendInput(1, &input, sizeof(input));
 }
 
+// Only touched on the server thread: the window the wheel last went to.
+HWND g_wheelRoot;
+
+// The window the wheel is for: the one under the cursor - unless a window is
+// being moved, which is, wherever the cursor has got to by now.
+HWND WheelTarget(POINT pt) {
+    HWND under = GetAncestor(WindowFromPoint(pt), GA_ROOT);
+    for (HWND candidate : {under, g_wheelRoot}) {
+        GUITHREADINFO info{sizeof(info)};
+        if (candidate && IsWindow(candidate) &&
+            GetGUIThreadInfo(GetWindowThreadProcessId(candidate, nullptr),
+                             &info) &&
+            (info.flags & GUI_INMOVESIZE) && info.hwndMoveSize &&
+            (candidate == under ||
+             GetAncestor(info.hwndMoveSize, GA_ROOT) == candidate)) {
+            return GetAncestor(info.hwndMoveSize, GA_ROOT);
+        }
+    }
+    return under;
+}
+
+// The wheel turned with the modifier held, over a window: it is the window's
+// to grow or shrink by (actions.cpp), rather than the app's to scroll. Taken
+// here for every window alike, so it needs no hole: the window is asked, and
+// not pressed again.
+bool TakeWheel(const MSLLHOOKSTRUCT* info) {
+    if (!g_settings.wheelScale || info->dwExtraInfo == kInjectedMarker ||
+        !IsDragModifierDown()) {
+        return false;
+    }
+    HWND root = WheelTarget(info->pt);
+    DWORD pid = 0;
+    GetWindowThreadProcessId(root, &pid);
+    if (!(IsShellProcess() || pid == GetCurrentProcessId()) || !CanScale(root)) {
+        return false;
+    }
+    g_wheelRoot = root;
+    PostMessageW(root, g_msgDrag, kDragScale, (short)HIWORD(info->mouseData));
+    ArmWinMask(g_settings.dragModifier == DragModifier::Win,
+               g_settings.dragModifier == DragModifier::Alt);
+    return true;
+}
+
 LRESULT CALLBACK LowLevelMouseProc(int code, WPARAM wParam, LPARAM lParam) {
     ModRef ref;  // the image must not go away under this procedure
 
@@ -400,6 +443,9 @@ LRESULT CALLBACK LowLevelMouseProc(int code, WPARAM wParam, LPARAM lParam) {
                 return 1;
             }
         }
+    }
+    if (wParam == WM_MOUSEWHEEL && TakeWheel(info)) {
+        return 1;
     }
     int button = ButtonIndex(wParam, info->mouseData);
     if (button < 0) {

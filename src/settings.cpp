@@ -179,6 +179,12 @@ DragTranslucency ParseDragTranslucency(PCWSTR raw) {
     return DragTranslucency::Both;
 }
 
+// Anything unrecognized is the cursor, the default.
+WheelAnchor ParseWheelAnchor(PCWSTR raw) {
+    return NormalizeSettingString(raw) == L"CENTER" ? WheelAnchor::Center
+                                                    : WheelAnchor::Cursor;
+}
+
 ModifierClick ParseModifierClick(PCWSTR raw) {
     std::wstring s = NormalizeSettingString(raw);
     if (s == L"APP") {
@@ -324,6 +330,12 @@ void LoadSettings() {
                                            kDefaultDragFadeIn, 1, 2000);
     g_settings.dragFadeOut = ClampedSetting(Wh_GetIntSetting(L"drag.fadeOut"),
                                             kDefaultDragFadeOut, 1, 2000);
+    g_settings.wheelScale = Wh_GetIntSetting(L"drag.wheel") != 0;
+    g_settings.wheelStep = ClampedSetting(Wh_GetIntSetting(L"drag.wheelStep"),
+                                          kDefaultWheelStep, 1, 100);
+    WindhawkUtils::StringSetting wheelAnchor(
+        Wh_GetStringSetting(L"drag.wheelWhileMoving"));
+    g_settings.wheelAnchor = ParseWheelAnchor(wheelAnchor);
 
     WindhawkUtils::StringSetting menuBar(Wh_GetStringSetting(L"titleBar.menuBar"));
     g_settings.menuBarMode = ParseMenuBarMode(menuBar);

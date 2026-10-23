@@ -848,8 +848,12 @@ static void MoveCursorGradually(POINT from, POINT to, int steps) {
 // move/resize loop is entered from - while another thread drags the mouse and
 // releases the button. With cancel=true, Esc is pressed before the button is
 // released.
+// `notches`: the wheel turned half way through, the way the shell's mouse
+// hook asks the window for it - and with `stillAfter`, the button let go of
+// right there, without another move.
 static void DragWith(bool right, HWND hwnd, POINT start, POINT delta,
-                     WPARAM kind, bool cancel = false) {
+                     WPARAM kind, bool cancel = false, int notches = 0,
+                     bool stillAfter = false, int rounds = 0) {
     SetCursorPos(start.x, start.y);
     Sleep(50);
     SendMouse(right ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN);
@@ -886,7 +890,30 @@ static void DragWith(bool right, HWND hwnd, POINT start, POINT delta,
     std::thread mover([=] {
         Sleep(200);
         POINT end{start.x + delta.x, start.y + delta.y};
-        MoveCursorGradually(start, end, 12);
+        if (rounds) {
+            // Up and down by turns while the mouse keeps moving, the window
+            // always a step behind it.
+            POINT at = start;
+            for (int i = 0; i < 2 * rounds; i++) {
+                POINT next{start.x + delta.x * (i + 1) / (2 * rounds),
+                           start.y + delta.y * (i + 1) / (2 * rounds)};
+                PostMessageW(hwnd, g_msgDrag, kDragScale,
+                             (i % 2 ? -notches : notches) * WHEEL_DELTA);
+                MoveCursorGradually(at, next, 3);
+                at = next;
+            }
+        } else if (notches) {
+            POINT half{start.x + delta.x / 2, start.y + delta.y / 2};
+            MoveCursorGradually(start, half, 6);
+            Sleep(60);
+            PostMessageW(hwnd, g_msgDrag, kDragScale, notches * WHEEL_DELTA);
+            Sleep(120);
+            if (!stillAfter) {
+                MoveCursorGradually(half, end, 6);
+            }
+        } else {
+            MoveCursorGradually(start, end, 12);
+        }
         Sleep(120);
         if (cancel) {
             INPUT k[2]{};
@@ -1055,6 +1082,101 @@ static void TestMoveResize() {
     GetWindowRect(hwnd, &before);
     POINT center{(before.left + before.right) / 2,
                  (before.top + before.bottom) / 2};
+
+    // The wheel turned in the middle of a move: the window takes the new size
+    // there and then, and keeps it through the rest of the drag and after,
+    // with the point it is held by still under the cursor.
+    {
+        bool savedWheel = g_settings.wheelScale;
+        g_settings.wheelScale = true;  // the stubs read it as off
+        RECT frame = VisibleFrameOf(hwnd);
+        POINT grab{frame.left + (frame.right - frame.left) / 4,
+                   frame.top + (frame.bottom - frame.top) / 3};
+        double atX = (double)(grab.x - frame.left) / (frame.right - frame.left);
+        double atY = (double)(grab.y - frame.top) / (frame.bottom - frame.top);
+        DragWith(false, hwnd, grab, {100, 60}, kDragMove, false, 2);
+        PumpRaw(100);
+        RECT scaled = VisibleFrameOf(hwnd);
+        int wantW = (int)lround((frame.right - frame.left) * 1.21);
+        int wantH = (int)lround((frame.bottom - frame.top) * 1.21);
+        POINT end{grab.x + 100, grab.y + 60};
+        CHECK(abs((scaled.right - scaled.left) - wantW) <= 2 &&
+                  abs((scaled.bottom - scaled.top) - wantH) <= 2,
+              "the wheel mid-move scales the window, and it keeps the size "
+              "(%ldx%ld, %dx%d expected)",
+              scaled.right - scaled.left, scaled.bottom - scaled.top, wantW,
+              wantH);
+        CHECK(abs(scaled.left + (int)lround(atX * (scaled.right - scaled.left)) -
+                  end.x) <= 3 &&
+                  abs(scaled.top +
+                      (int)lround(atY * (scaled.bottom - scaled.top)) -
+                      end.y) <= 3,
+              "with the point it is held by under the cursor");
+        CHECK(!IsDragSnapping(hwnd), "and the subclass comes off with the drag");
+
+        // And let go of without another move, the loop's own last rectangle
+        // is not the size it started with.
+        RECT big = VisibleFrameOf(hwnd);
+        POINT hold{big.left + (big.right - big.left) / 2,
+                   big.top + (big.bottom - big.top) / 2};
+        DragWith(false, hwnd, hold, {60, 40}, kDragMove, false, -2, true);
+        PumpRaw(100);
+        RECT kept = VisibleFrameOf(hwnd);
+        CHECK(abs((kept.right - kept.left) - (frame.right - frame.left)) <= 2 &&
+                  abs((kept.bottom - kept.top) - (frame.bottom - frame.top)) <= 2,
+              "and let go of without a move after the wheel, it keeps the size "
+              "too (%ldx%ld, %ldx%ld expected)",
+              kept.right - kept.left, kept.bottom - kept.top,
+              frame.right - frame.left, frame.bottom - frame.top);
+
+        // Up and down by turns as the window is moved along, and it ends where
+        // it began in size, still held by the same point.
+        RECT steady = VisibleFrameOf(hwnd);
+        POINT from{steady.left + (steady.right - steady.left) / 5,
+                   steady.top + (steady.bottom - steady.top) / 4};
+        double fromX = (double)(from.x - steady.left) / (steady.right - steady.left);
+        double fromY = (double)(from.y - steady.top) / (steady.bottom - steady.top);
+        DragWith(false, hwnd, from, {120, 80}, kDragMove, false, 2, false, 6);
+        PumpRaw(100);
+        RECT roundTrip = VisibleFrameOf(hwnd);
+        POINT to{from.x + 120, from.y + 80};
+        CHECK(abs((roundTrip.right - roundTrip.left) - (steady.right - steady.left)) <= 2 &&
+                  abs((roundTrip.bottom - roundTrip.top) - (steady.bottom - steady.top)) <= 2,
+              "up and down by turns on the move, it ends at its size "
+              "(%ldx%ld, %ldx%ld before)",
+              roundTrip.right - roundTrip.left, roundTrip.bottom - roundTrip.top,
+              steady.right - steady.left, steady.bottom - steady.top);
+        int heldX = roundTrip.left + (int)lround(fromX * (roundTrip.right - roundTrip.left));
+        int heldY = roundTrip.top + (int)lround(fromY * (roundTrip.bottom - roundTrip.top));
+        CHECK(abs(heldX - to.x) <= 3 && abs(heldY - to.y) <= 3,
+              "and still held under the cursor by the same point (off by %ld,%ld)",
+              heldX - to.x, heldY - to.y);
+
+        // Around the center instead, as the settings may have it.
+        g_settings.wheelAnchor = WheelAnchor::Center;
+        RECT plain = VisibleFrameOf(hwnd);
+        POINT mid{(plain.left + plain.right) / 2 - 40,
+                  (plain.top + plain.bottom) / 2 - 20};
+        int awayX = mid.x - (plain.left + plain.right) / 2;
+        int awayY = mid.y - (plain.top + plain.bottom) / 2;
+        DragWith(false, hwnd, mid, {60, 30}, kDragMove, false, 2);
+        PumpRaw(100);
+        RECT centered = VisibleFrameOf(hwnd);
+        POINT endAt{mid.x + 60, mid.y + 30};
+        CHECK(abs((centered.left + centered.right) / 2 + awayX - endAt.x) <= 3 &&
+                  abs((centered.top + centered.bottom) / 2 + awayY - endAt.y) <= 3 &&
+                  (centered.right - centered.left) > (plain.right - plain.left),
+              "around its center, the center keeps its place to the cursor");
+        g_settings.wheelAnchor = WheelAnchor::Cursor;
+        ScaleWindow(hwnd, -2 * WHEEL_DELTA);
+        g_settings.wheelScale = savedWheel;
+        SetWindowPos(hwnd, nullptr, before.left, before.top, 0, 0,
+                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        PumpRaw(100);
+        GetWindowRect(hwnd, &before);
+        center = POINT{(before.left + before.right) / 2,
+                       (before.top + before.bottom) / 2};
+    }
 
     // Move.
     DragWith(false, hwnd, center, {140, 90}, kDragMove);
@@ -2678,6 +2800,117 @@ static void TestSnapGeometry() {
 ////////////////////////////////////////////////////////////////////////////////
 // Gestures: what a double click is, and what an action does
 
+static RECT FrameOf(HWND hwnd) {
+    RECT frame;
+    DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &frame,
+                          sizeof(frame));
+    return frame;
+}
+
+static void TestWheelScale() {
+    printf("\n== modifier + wheel ==\n");
+    int savedStep = g_settings.wheelStep;
+    g_settings.wheelStep = 10;
+    HWND hwnd = CreateTestWindow(L"Hypr wheel", false, 300, 300);
+    RECT before = FrameOf(hwnd);
+    int w = before.right - before.left, h = before.bottom - before.top;
+    ScaleWindow(hwnd, WHEEL_DELTA);
+    RECT up = FrameOf(hwnd);
+    int upW = up.right - up.left, upH = up.bottom - up.top;
+    CHECK(abs(upW - (int)lround(w * 1.1)) <= 1 && abs(upH - (int)lround(h * 1.1)) <= 1,
+          "a notch up makes the window 10%% larger (%dx%d to %dx%d)", w, h, upW,
+          upH);
+    CHECK(abs((up.left + up.right) - (before.left + before.right)) <= 2 &&
+              abs((up.top + up.bottom) - (before.top + before.bottom)) <= 2,
+          "around its center");
+    ScaleWindow(hwnd, -WHEEL_DELTA);
+    RECT back = FrameOf(hwnd);
+    CHECK(abs((back.right - back.left) - w) <= 1 &&
+              abs((back.bottom - back.top) - h) <= 1,
+          "and a notch down takes it back (%ldx%ld)", back.right - back.left,
+          back.bottom - back.top);
+    for (int i = 0; i < 10; i++) {
+        ScaleWindow(hwnd, WHEEL_DELTA);
+        ScaleWindow(hwnd, WHEEL_DELTA / 3);
+        ScaleWindow(hwnd, -WHEEL_DELTA / 3);
+        ScaleWindow(hwnd, -WHEEL_DELTA);
+    }
+    RECT again = FrameOf(hwnd);
+    CHECK(EqualRect(&back, &again),
+          "and up and down ten times over, it is where it was, to the pixel "
+          "(%ld,%ld %ldx%ld)",
+          again.left, again.top, again.right - again.left,
+          again.bottom - again.top);
+
+    MONITORINFO monitor{sizeof(monitor)};
+    GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor);
+    int workW = monitor.rcWork.right - monitor.rcWork.left;
+    int workH = monitor.rcWork.bottom - monitor.rcWork.top;
+    ScaleWindow(hwnd, 40 * WHEEL_DELTA);
+    RECT big = FrameOf(hwnd);
+    int bigW = big.right - big.left, bigH = big.bottom - big.top;
+    CHECK(bigW <= workW + 1 && bigH <= workH + 1 &&
+              (abs(bigW - workW) <= 1 || abs(bigH - workH) <= 1),
+          "it grows no larger than the work area (%dx%d in %dx%d)", bigW, bigH,
+          workW, workH);
+    CHECK(abs(bigW * h - bigH * w) <= std::max(w, h) * 2,
+          "and keeps its shape on the way");
+    ScaleWindow(hwnd, -60 * WHEEL_DELTA);
+    RECT small = FrameOf(hwnd);
+    RECT smallWindow;
+    GetWindowRect(hwnd, &smallWindow);
+    CHECK(small.right - small.left > 0 &&
+              (smallWindow.right - smallWindow.left <=
+                   GetSystemMetrics(SM_CXMINTRACK) + 1 ||
+               smallWindow.bottom - smallWindow.top <=
+                   GetSystemMetrics(SM_CYMINTRACK) + 1),
+          "and no smaller than it lets itself be sized (%ldx%ld)",
+          smallWindow.right - smallWindow.left,
+          smallWindow.bottom - smallWindow.top);
+
+    // Notches that came while the window was busy go in one step, to where
+    // they would have taken it one by one.
+    ScaleWindow(hwnd, -60 * WHEEL_DELTA);
+    ScaleWindow(hwnd, 3 * WHEEL_DELTA);
+    RECT startFrame = FrameOf(hwnd);
+    static int sizes;
+    sizes = 0;
+    WNDPROC original = (WNDPROC)SetWindowLongPtrW(
+        hwnd, GWLP_WNDPROC, (LONG_PTR)(WNDPROC)[](HWND h, UINT m, WPARAM w,
+                                                  LPARAM l) -> LRESULT {
+            if (m == WM_SIZE) {
+                sizes++;
+            }
+            return CallWindowProcW((WNDPROC)GetPropW(h, L"HyprTestProc"), h, m,
+                                   w, l);
+        });
+    SetPropW(hwnd, L"HyprTestProc", (HANDLE)original);
+    InstallMessageHookForThread();
+    for (int i = 0; i < 5; i++) {
+        PostMessageW(hwnd, g_msgDrag, kDragScale, WHEEL_DELTA);
+    }
+    Pump(200);
+    RECT queued = FrameOf(hwnd);
+    int queuedW = queued.right - queued.left;
+    int expectW = (int)lround((startFrame.right - startFrame.left) * pow(1.1, 5));
+    CHECK(sizes == 1 && abs(queuedW - expectW) <= 1,
+          "five notches waiting are one step (%d resizes, %d wide, %d expected)",
+          sizes, queuedW, expectW);
+    SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (LONG_PTR)original);
+    RemovePropW(hwnd, L"HyprTestProc");
+
+    ShowWindow(hwnd, SW_MAXIMIZE);
+    Pump(100);
+    RECT maximized;
+    GetWindowRect(hwnd, &maximized);
+    ScaleWindow(hwnd, WHEEL_DELTA);
+    RECT after;
+    GetWindowRect(hwnd, &after);
+    CHECK(EqualRect(&maximized, &after), "a maximized window is left alone");
+    DestroyWindow(hwnd);
+    g_settings.wheelStep = savedStep;
+}
+
 static void TestGestures() {
     printf("\n== gestures ==\n");
 
@@ -3143,6 +3376,7 @@ int main(int argc, char** argv) {
     TestDesktops(noInput);
     TestSnapGeometry();
     TestGestures();
+    TestWheelScale();
     TestResizeRelease();
     TestDragFade();
     if (!noInput) {
