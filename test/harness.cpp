@@ -676,6 +676,99 @@ static void TestFramelessGeometry(bool withMenu, MenuBarMode mode) {
     Pump(100);
 }
 
+// A hidden menu bar is drawn over the client area by nothing that paints the
+// frame - a repaint, the window turning inactive and active, Alt showing the
+// underlines - only while the keyboard is in it; and DWM keeps drawing what is
+// left of the frame.
+static void TestHiddenMenuBar() {
+    printf("\n== hidden menu bar ==\n");
+    g_settings.menuBarMode = MenuBarMode::Hide;
+    HWND hwnd = CreateTestWindow(L"Hypr test (hidden menu)", true, 160, 160);
+    Pump(400);
+    RequestFrameless(hwnd, kActionToggle);
+    Pump(400);
+    CHECK(IsFrameless(hwnd), "window is frameless");
+
+    MENUBARINFO bar{sizeof(bar)};
+    GetMenuBarInfo(hwnd, OBJID_MENU, 0, &bar);
+    RECT win, button;
+    GetWindowRect(hwnd, &win);
+    GetWindowRect(GetDlgItem(hwnd, 100), &button);
+    printf("  menu bar (%ld,%ld)-(%ld,%ld), window top %ld\n", bar.rcBar.left,
+           bar.rcBar.top, bar.rcBar.right, bar.rcBar.bottom, win.top);
+
+    auto framePainted = [&]() {
+        BOOL painted = FALSE;
+        DwmGetWindowAttribute(hwnd, DWMWA_NCRENDERING_ENABLED, &painted,
+                              sizeof(painted));
+        return painted != FALSE;
+    };
+    // How many points across the bar's strip have something else than the
+    // window's own background (or the child button that reaches into it).
+    auto pointsDrawnOver = [&]() {
+        HDC dc = GetWindowDC(hwnd);
+        int drawn = 0;
+        LONG rows[] = {bar.rcBar.top + 2, (bar.rcBar.top + bar.rcBar.bottom) / 2,
+                       bar.rcBar.bottom - 1};
+        for (int i = 1; i < 20; i++) {
+            LONG x = bar.rcBar.left + (bar.rcBar.right - bar.rcBar.left) * i / 20;
+            for (LONG y : rows) {
+                POINT pt{x, y};
+                if (PtInRect(&button, pt)) {
+                    continue;
+                }
+                drawn += GetPixel(dc, x - win.left, y - win.top) !=
+                         RGB(230, 240, 255);
+            }
+        }
+        ReleaseDC(hwnd, dc);
+        return drawn;
+    };
+
+    CHECK(framePainted(), "DWM still draws the frame");
+    CHECK(pointsDrawnOver() == 0, "hidden: nothing over the client (%d)",
+          pointsDrawnOver());
+
+    RedrawWindow(hwnd, nullptr, nullptr,
+                 RDW_FRAME | RDW_INVALIDATE | RDW_UPDATENOW);
+    CHECK(pointsDrawnOver() == 0, "frame repainted: nothing over the client (%d)",
+          pointsDrawnOver());
+    DrawMenuBar(hwnd);
+    Pump(100);
+    CHECK(pointsDrawnOver() == 0, "DrawMenuBar: nothing over the client (%d)",
+          pointsDrawnOver());
+    SendMessageW(hwnd, WM_NCACTIVATE, FALSE, 0);
+    CHECK(pointsDrawnOver() == 0, "turned inactive: nothing over the client (%d)",
+          pointsDrawnOver());
+    SendMessageW(hwnd, WM_NCACTIVATE, TRUE, 0);
+    CHECK(pointsDrawnOver() == 0, "turned active: nothing over the client (%d)",
+          pointsDrawnOver());
+    SendMessageW(hwnd, WM_CHANGEUISTATE, MAKEWPARAM(UIS_CLEAR, UISF_HIDEACCEL),
+                 0);
+    Pump(100);
+    CHECK(pointsDrawnOver() == 0, "Alt's underlines: nothing over the client (%d)",
+          pointsDrawnOver());
+    SendMessageW(hwnd, WM_CHANGEUISTATE, MAKEWPARAM(UIS_SET, UISF_HIDEACCEL), 0);
+
+    // While the keyboard is in it, it is drawn; once it is done, painted over.
+    ShowHiddenMenuBar(hwnd, true);
+    CHECK(pointsDrawnOver() > 0, "keyboard in the bar: it is drawn (%d)",
+          pointsDrawnOver());
+    ShowHiddenMenuBar(hwnd, false);
+    Pump(200);
+    CHECK(pointsDrawnOver() == 0, "keyboard done: painted over again (%d)",
+          pointsDrawnOver());
+    CHECK(framePainted(), "DWM still draws the frame after all that");
+
+    RequestFrameless(hwnd, kActionToggle);
+    Pump(400);
+    CHECK(!IsFrameless(hwnd), "title bar back");
+    CHECK(framePainted(), "title bar back: DWM draws the frame");
+
+    DestroyWindow(hwnd);
+    Pump(100);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // The WH_GETMESSAGE interception hook
 
@@ -3441,6 +3534,7 @@ int main(int argc, char** argv) {
     TestFramelessGeometry(false, MenuBarMode::Hide);
     TestFramelessGeometry(true, MenuBarMode::Hide);
     TestFramelessGeometry(true, MenuBarMode::KeepMenu);
+    TestHiddenMenuBar();
     TestMessageHook();
     TestReusedThreadId();
     TestAutoHide();
