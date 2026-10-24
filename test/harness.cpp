@@ -2896,6 +2896,42 @@ static void TestWheelScale() {
     CHECK(sizes == 1 && abs(queuedW - expectW) <= 1,
           "five notches waiting are one step (%d resizes, %d wide, %d expected)",
           sizes, queuedW, expectW);
+    // A touchpad's stream of small turns: the window steps no more often
+    // than it can draw, and still ends where the whole stream takes it.
+    RECT streamStart = FrameOf(hwnd);
+    sizes = 0;
+    int total = 0;
+    std::atomic<DWORD> lastPost{0};
+    std::thread stream([&] {
+        DWORD start = GetTickCount();
+        while (GetTickCount() - start < 400) {
+            PostMessageW(hwnd, g_msgDrag, kDragScale, 12);
+            total += 12;
+            lastPost = GetTickCount();
+            Sleep(5);
+        }
+    });
+    RECT seen = streamStart;
+    DWORD lastChange = GetTickCount();
+    DWORD until = GetTickCount() + 1000;
+    while ((int)(until - GetTickCount()) > 0) {
+        Pump(5);
+        RECT now = FrameOf(hwnd);
+        if (!EqualRect(&now, &seen)) {
+            seen = now;
+            lastChange = GetTickCount();
+        }
+    }
+    stream.join();
+    int streamW = (int)lround((streamStart.right - streamStart.left) *
+                              pow(1.1, total / (double)WHEEL_DELTA));
+    CHECK(sizes <= 400 / 40 + 2 &&
+              abs((seen.right - seen.left) - streamW) <= 1 &&
+              (long)(lastChange - lastPost) <= 60,
+          "a stream of small turns is taken in steps the window can draw "
+          "(%d of them), to where the stream takes it (%ld wide, %d expected), "
+          "%ld ms after it",
+          sizes, seen.right - seen.left, streamW, (long)(lastChange - lastPost));
     SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (LONG_PTR)original);
     RemovePropW(hwnd, L"HyprTestProc");
 

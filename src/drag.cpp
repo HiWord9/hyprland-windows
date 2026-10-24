@@ -447,6 +447,45 @@ bool ReplayHeldPress(MSG* msg, bool right) {
 // the queue: the message hook sees them go, and leaves them be.
 thread_local bool g_takingScaleSteps;
 
+// A window draws itself somewhere else than on the thread that takes these -
+// a browser in its own processes, a XAML app on its own thread - so taking
+// one step after another keeps up while the drawing does not: a touchpad's
+// stream of small turns would have the window lay itself out anew for every
+// one, and its picture fall further and further behind the fingers. So the
+// steps come no closer together than this, with what came in between added
+// to the next one; the first of a turn goes at once.
+constexpr DWORD kScaleStepMs = 40;
+struct PendingScale {
+    HWND root;
+    int delta;
+    UINT_PTR timer;  // a timer of the thread's, for the next step
+};
+thread_local PendingScale g_pendingScale;
+thread_local DWORD g_lastScaleStep;
+
+void TakeScaleStep() {
+    PendingScale step = g_pendingScale;
+    if (step.timer) {
+        KillTimer(nullptr, step.timer);
+    }
+    g_pendingScale = {};
+    g_lastScaleStep = GetTickCount();
+    if (step.root && step.delta && !g_uninitializing) {
+        ScaleWindow(step.root, step.delta);
+    }
+}
+
+// The timer has nothing of the mod's to call: its message is taken here,
+// before the application gets it.
+bool HandleScaleTimer(const MSG* msg) {
+    if (msg->hwnd || !g_pendingScale.timer ||
+        msg->wParam != g_pendingScale.timer) {
+        return false;
+    }
+    TakeScaleStep();
+    return true;
+}
+
 bool HandleDragRequest(MSG* msg) {
     HWND root = msg->hwnd;
     POINT pt{GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam)};
@@ -483,8 +522,21 @@ bool HandleDragRequest(MSG* msg) {
             delta += (int)next.lParam;
         }
         g_takingScaleSteps = false;
-        if (!g_uninitializing) {
-            ScaleWindow(root, delta);
+        if (g_pendingScale.root && g_pendingScale.root != root) {
+            TakeScaleStep();  // another window's, which is not to wait
+        }
+        g_pendingScale.root = root;
+        g_pendingScale.delta += delta;
+        if (g_pendingScale.timer || g_uninitializing) {
+            return false;
+        }
+        DWORD since = GetTickCount() - g_lastScaleStep;
+        if (since < kScaleStepMs) {
+            g_pendingScale.timer =
+                SetTimer(nullptr, 0, kScaleStepMs - since, nullptr);
+        }
+        if (!g_pendingScale.timer) {
+            TakeScaleStep();
         }
         return false;
     }

@@ -360,6 +360,7 @@ void RequestDrag(HWND root, WPARAM kind, POINT pt);
 // Per-thread: a button-up to swallow because we swallowed its button-down.
 extern thread_local bool g_swallowButtonUp[2];  // [0] = left, [1] = right
 bool HandleDragRequest(MSG* msg);
+bool HandleScaleTimer(const MSG* msg);
 // After a drag: the left button the loop needed held, let go again.
 void ReleaseForcedLeftButton();
 // Alt, kept from a move loop that would take it for a snap modifier.
