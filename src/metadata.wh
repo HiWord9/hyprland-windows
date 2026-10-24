@@ -65,8 +65,9 @@ the title bar.
   Electron apps, VS Code, Office) are not affected by the hotkey.
 * A window with a classic menu bar (File, Edit, ...) can't keep that menu where it
   is once the title bar is gone, so by default it is hidden along with it and
-  stays reachable from the keyboard with `Alt` or `F10`. The settings offer the
-  other choices.
+  stays reachable from the keyboard: letting go of `Alt`, or `F10`, brings it
+  up over the window until you are done with it. The settings offer the other
+  choices.
 * Win+Tab switches desktops through a part of Windows that Microsoft doesn't
   publish. It is known for Windows 10 and for Windows 11 from 22H2 on; on a
   build the mod doesn't recognize, Win+Tab stays Task View.

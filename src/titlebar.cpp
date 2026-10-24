@@ -11,6 +11,8 @@ struct FramelessState {
     bool autoHidden = false;
     // Style bits removed from the window (KeepMenu mode), restored later.
     DWORD removedStyle = 0;
+    // Hide mode: the menu bar is drawn for now, while the keyboard is in it.
+    bool menuBarShown = false;
 };
 std::mutex g_windowsMutex;
 std::unordered_map<HWND, FramelessState> g_windows;
@@ -63,6 +65,94 @@ void RefreshFrame(HWND hwnd) {
 
 void HandleFramelessRequest(HWND hwnd, WPARAM action);
 
+// A classic menu bar stays where the system lays it out, below where the
+// caption was, which is now the client area. The system draws it whenever it
+// sees fit - the frame painted on a resize or a focus change, Alt showing its
+// underlines - over whatever the window has there. So it is drawn only while
+// the keyboard is in it (Alt let go of, F10, Alt and a letter), and the window
+// paints over it again once it is done. Of the frame, nothing else is lost:
+// DWM draws what is left of it.
+
+// Undocumented: what a themed window is sent to draw its menu bar - before
+// the frame is painted, with the device context it is painted into; the bar
+// itself; each item on it. Answering TRUE to the latter two says it was drawn.
+constexpr UINT WM_UAHDRAWMENU = 0x0091;
+constexpr UINT WM_UAHDRAWMENUITEM = 0x0092;
+constexpr UINT WM_UAHINITMENU = 0x0093;
+struct UAHMENU {
+    HMENU menu;
+    HDC dc;
+    DWORD flags;
+};
+
+bool IsMenuBarShown(HWND hwnd) {
+    std::lock_guard<std::mutex> lock(g_windowsMutex);
+    auto it = g_windows.find(hwnd);
+    return it != g_windows.end() && it->second.menuBarShown;
+}
+
+// Where the bar is drawn, in screen pixels; with a little room around it for
+// the lines drawn along its edges, for keeping drawing off it.
+bool MenuBarRect(HWND hwnd, RECT* rect, bool withEdges) {
+    MENUBARINFO info{sizeof(info)};
+    if (!GetMenuBarInfo(hwnd, OBJID_MENU, 0, &info) ||
+        IsRectEmpty(&info.rcBar)) {
+        return false;
+    }
+    *rect = info.rcBar;
+    if (withEdges) {
+        InflateRect(rect, 0,
+                    MulDiv(3, GetDpiForWindow(hwnd), USER_DEFAULT_SCREEN_DPI));
+    }
+    return true;
+}
+
+// The bar is cut out of the device context the frame is about to be painted
+// into. That is how the background of a bar the app draws itself is kept out
+// as well: the system fills that in, unasked.
+void KeepFramePaintingOffMenuBar(HWND hwnd, HDC dc) {
+    RECT strip, window;
+    if (!dc || WindowFromDC(dc) != hwnd || !MenuBarRect(hwnd, &strip, true) ||
+        !GetWindowRect(hwnd, &window)) {
+        return;  // one that is only measured with, say
+    }
+    OffsetRect(&strip, -window.left, -window.top);
+    ExcludeClipRect(dc, strip.left, strip.top, strip.right, strip.bottom);
+}
+
+void ShowHiddenMenuBar(HWND hwnd, bool show) {
+    {
+        std::lock_guard<std::mutex> lock(g_windowsMutex);
+        auto it = g_windows.find(hwnd);
+        if (it == g_windows.end() || it->second.menuBarShown == show) {
+            return;
+        }
+        it->second.menuBarShown = show;
+    }
+    RECT bar;
+    if (!MenuBarRect(hwnd, &bar, !show)) {
+        return;
+    }
+    if (show) {
+        // Painting the frame would not reach it: what is painted of the frame
+        // is what is outside the client area. So the frame is printed into
+        // the window instead, onto just the bar.
+        RECT window;
+        GetWindowRect(hwnd, &window);
+        OffsetRect(&bar, -window.left, -window.top);
+        if (HDC dc = GetWindowDC(hwnd)) {
+            IntersectClipRect(dc, bar.left, bar.top, bar.right, bar.bottom);
+            DefWindowProcW(hwnd, WM_PRINT, reinterpret_cast<WPARAM>(dc),
+                           PRF_NONCLIENT);
+            ReleaseDC(hwnd, dc);
+        }
+        return;
+    }
+    MapWindowPoints(nullptr, hwnd, reinterpret_cast<POINT*>(&bar), 2);
+    RedrawWindow(hwnd, &bar, nullptr,
+                 RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+}
+
 LRESULT CALLBACK FramelessSubclassProc(HWND hwnd,
                                        UINT uMsg,
                                        WPARAM wParam,
@@ -79,6 +169,59 @@ LRESULT CALLBACK FramelessSubclassProc(HWND hwnd,
                 break;  // WS_CAPTION was removed instead; default layout
             }
             return OnNcCalcSize(hwnd, wParam, lParam);
+
+        case WM_UAHINITMENU:
+            if (!keepMenu && !IsMenuBarShown(hwnd) && lParam) {
+                KeepFramePaintingOffMenuBar(
+                    hwnd, reinterpret_cast<UAHMENU*>(lParam)->dc);
+            }
+            break;
+
+        case WM_NCPAINT:
+        case WM_NCACTIVATE:
+            // Past the app: what an app paints of its frame itself is what it
+            // adds to its bar (a dark one's edges, for one), and nothing else
+            // of the frame is left to paint. DefWindowProc still has to: DWM
+            // only draws the frame of a window it sees painted the usual way.
+            if (!keepMenu && GetMenu(hwnd) && !IsMenuBarShown(hwnd)) {
+                return DefWindowProcW(hwnd, uMsg, wParam, lParam);
+            }
+            break;
+
+        case WM_UAHDRAWMENU:
+        case WM_UAHDRAWMENUITEM:
+            if (!keepMenu && !IsMenuBarShown(hwnd)) {
+                return TRUE;
+            }
+            break;
+
+        case WM_DRAWITEM:
+            // Items of an owner-drawn bar, which the app draws itself.
+            if (!keepMenu && !IsMenuBarShown(hwnd)) {
+                auto* item = reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
+                if (item->CtlType == ODT_MENU &&
+                    reinterpret_cast<HMENU>(item->hwndItem) == GetMenu(hwnd)) {
+                    return TRUE;
+                }
+            }
+            break;
+
+        case WM_MENUSELECT:
+            // One of the bar's own items, not the window menu Alt+Space opens
+            // (which leaves the keyboard on the bar's window menu icon on its
+            // way out) or a context menu.
+            if (!keepMenu && lParam &&
+                reinterpret_cast<HMENU>(lParam) == GetMenu(hwnd) &&
+                HIWORD(wParam) != 0xFFFF && !(HIWORD(wParam) & MF_SYSMENU)) {
+                ShowHiddenMenuBar(hwnd, true);
+            }
+            break;
+
+        case WM_EXITMENULOOP:
+            if (!keepMenu) {
+                ShowHiddenMenuBar(hwnd, false);
+            }
+            break;
 
         case WM_NCHITTEST: {
             LRESULT hit = DefSubclassProc(hwnd, uMsg, wParam, lParam);
