@@ -36,6 +36,10 @@ void ProcessRetrievedMessage(MSG* msg) {
             consumed = HandleDesktopHotkey(msg);
             break;
 
+        case WM_TIMER:
+            consumed = HandleScaleTimer(msg);
+            break;
+
         // The shortcut gets first refusal on every button: it can be bound
         // to any of them, and one bound to left or right takes that button
         // away from the drag, which is the user's business to decide.
