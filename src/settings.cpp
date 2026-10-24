@@ -179,10 +179,16 @@ DragTranslucency ParseDragTranslucency(PCWSTR raw) {
     return DragTranslucency::Both;
 }
 
-// Anything unrecognized is the cursor, the default.
+// Anything unrecognized is the default, the center or the hold.
 WheelAnchor ParseWheelAnchor(PCWSTR raw) {
-    return NormalizeSettingString(raw) == L"CENTER" ? WheelAnchor::Center
-                                                    : WheelAnchor::Cursor;
+    std::wstring s = NormalizeSettingString(raw);
+    if (s == L"CURSOR") {
+        return WheelAnchor::Cursor;
+    }
+    if (s == L"CENTERALWAYS") {
+        return WheelAnchor::Center;
+    }
+    return WheelAnchor::CenterOrHold;
 }
 
 ModifierClick ParseModifierClick(PCWSTR raw) {
@@ -334,7 +340,7 @@ void LoadSettings() {
     g_settings.wheelStep = ClampedSetting(Wh_GetIntSetting(L"drag.wheelStep"),
                                           kDefaultWheelStep, 1, 100);
     WindhawkUtils::StringSetting wheelAnchor(
-        Wh_GetStringSetting(L"drag.wheelWhileMoving"));
+        Wh_GetStringSetting(L"drag.wheelAround"));
     g_settings.wheelAnchor = ParseWheelAnchor(wheelAnchor);
 
     WindhawkUtils::StringSetting menuBar(Wh_GetStringSetting(L"titleBar.menuBar"));

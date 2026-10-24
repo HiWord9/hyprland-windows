@@ -1167,7 +1167,7 @@ static void TestMoveResize() {
                   abs((centered.top + centered.bottom) / 2 + awayY - endAt.y) <= 3 &&
                   (centered.right - centered.left) > (plain.right - plain.left),
               "around its center, the center keeps its place to the cursor");
-        g_settings.wheelAnchor = WheelAnchor::Cursor;
+        g_settings.wheelAnchor = WheelAnchor::CenterOrHold;
         ScaleWindow(hwnd, -2 * WHEEL_DELTA);
         g_settings.wheelScale = savedWheel;
         SetWindowPos(hwnd, nullptr, before.left, before.top, 0, 0,
@@ -2841,6 +2841,45 @@ static void TestWheelScale() {
           "(%ld,%ld %ldx%ld)",
           again.left, again.top, again.right - again.left,
           again.bottom - again.top);
+
+    // Around the cursor instead, as the settings may have it: the point under
+    // the cursor stays under it, and the window comes back as it was.
+    g_settings.wheelAnchor = WheelAnchor::Cursor;
+    POINT savedCursor;
+    GetCursorPos(&savedCursor);
+    POINT at{again.left + (again.right - again.left) / 4,
+             again.top + (again.bottom - again.top) / 4};
+    SetCursorPos(at.x, at.y);
+    double atX = (double)(at.x - again.left) / (again.right - again.left);
+    double atY = (double)(at.y - again.top) / (again.bottom - again.top);
+    ScaleWindow(hwnd, 2 * WHEEL_DELTA);
+    RECT around = FrameOf(hwnd);
+    CHECK(abs(around.left + (int)lround(atX * (around.right - around.left)) - at.x) <= 1 &&
+              abs(around.top + (int)lround(atY * (around.bottom - around.top)) - at.y) <= 1 &&
+              around.right - around.left > again.right - again.left,
+          "around the cursor, the point under it stays there");
+    ScaleWindow(hwnd, -2 * WHEEL_DELTA);
+    RECT aroundBack = FrameOf(hwnd);
+    CHECK(EqualRect(&again, &aroundBack), "and a turn back puts it where it was");
+    SetCursorPos(savedCursor.x, savedCursor.y);
+    g_settings.wheelAnchor = WheelAnchor::CenterOrHold;
+
+    // A turn of the wheel stays with its window, wherever the cursor has got
+    // to, until it rests or the modifier comes up.
+    {
+        RECT away;
+        GetWindowRect(hwnd, &away);
+        POINT elsewhere{away.right + 200, away.bottom + 200};
+        g_wheelRoot = hwnd;
+        g_wheelAt = 10000;
+        CHECK(WheelTarget(elsewhere, 10000 + 300) == hwnd,
+              "a turn goes on with its window, the cursor off it");
+        CHECK(WheelTarget(elsewhere, 10000 + kWheelTurnMs + 50) != hwnd,
+              "but not once the wheel has rested");
+        EndWheelTurn();
+        CHECK(WheelTarget(elsewhere, 10000 + 300) != hwnd,
+              "nor once the modifier has come up");
+    }
 
     MONITORINFO monitor{sizeof(monitor)};
     GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor);
