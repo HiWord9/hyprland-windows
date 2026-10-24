@@ -512,10 +512,11 @@ bool TakeWheel(const MSLLHOOKSTRUCT* info) {
         !IsDragModifierDown()) {
         return false;
     }
+    // Any window's, here as in the shell: with an elevated window in front,
+    // the shell's hook is not called at all, and this one - in front of it in
+    // the chain - is the only one to see the wheel.
     HWND root = WheelTarget(info->pt, info->time);
-    DWORD pid = 0;
-    GetWindowThreadProcessId(root, &pid);
-    if (!(IsShellProcess() || pid == GetCurrentProcessId()) || !CanScale(root)) {
+    if (!CanScale(root)) {
         return false;
     }
     g_wheelRoot = root;
