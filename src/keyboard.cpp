@@ -136,6 +136,12 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
         return 1;
     }
     bool isWin = info->vkCode == VK_LWIN || info->vkCode == VK_RWIN;
+    bool isModifier = g_settings.dragModifier == DragModifier::Win
+                          ? isWin
+                          : info->vkCode == VK_LMENU || info->vkCode == VK_RMENU;
+    if (keyUp && isModifier) {
+        EndWheelTurn();  // the next turn is for the window it starts over
+    }
     bool isAlt = info->vkCode == VK_LMENU || info->vkCode == VK_RMENU ||
                  info->vkCode == VK_MENU;
     if (g_winMaskArmed && keyUp &&

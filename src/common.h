@@ -81,8 +81,10 @@ enum class MenuBarMode { Hide, KeepMenu, Skip };
 enum class WindowAction { None, ToggleMaximize, ToggleTitleBar, Close };
 // Which drags fade the window they are dragging.
 enum class DragTranslucency { Both, MoveOnly, Off };
-// What a window being moved grows and shrinks around, with the mouse wheel.
-enum class WheelAnchor { Cursor, Center };
+// What the mouse wheel grows and shrinks a window around: its center - or
+// the point the cursor holds it by while it is moved - the cursor, or its
+// center even while it is moved.
+enum class WheelAnchor { CenterOrHold, Cursor, Center };
 // Where a click with the modifier held goes when the mouse doesn't move.
 enum class ModifierClick { Auto, App, Window };
 // What a dragged window's edges are magnetic to.
@@ -140,7 +142,7 @@ struct Settings {
     std::atomic<int> dragFadeOut{kDefaultDragFadeOut};
     std::atomic<bool> wheelScale{true};
     std::atomic<int> wheelStep{kDefaultWheelStep};
-    std::atomic<WheelAnchor> wheelAnchor{WheelAnchor::Cursor};
+    std::atomic<WheelAnchor> wheelAnchor{WheelAnchor::CenterOrHold};
     std::atomic<MenuBarMode> menuBarMode{MenuBarMode::Hide};
     std::atomic<bool> hideByDefault{false};
     std::atomic<COLORREF> borderActive{kColorUntouched};
@@ -339,6 +341,7 @@ constexpr int kMoveSizeStartWaitMs = 500;
 bool IsDragModifierDown();
 LRESULT CALLBACK LowLevelMouseProc(int code, WPARAM wParam, LPARAM lParam);
 bool HasCompositionContentWindow();
+void EndWheelTurn();
 bool TouchpadGoesToWheel(WPARAM pointerHitTest);
 void KeepTouchpadFromApp(HWND hwnd, WPARAM pointerHitTest);
 std::vector<HWND> SnapshotTouchpadWindows();
@@ -397,6 +400,9 @@ void RequestWindowAction(HWND root, WindowAction action);
 // Magnetic edges, and the aspect ratio while resizing
 
 RECT VisibleFrameOf(HWND hwnd);
+RECT FrameInsetOf(HWND hwnd);
+RECT WindowToFrame(const RECT& rc, const RECT& inset);
+RECT FrameToWindow(const RECT& rc, const RECT& inset);
 bool SnapAllowedWith(bool modifierDown);
 bool SnapAllowed();
 void BeginDragSnap(HWND root, WPARAM kind, POINT pt);

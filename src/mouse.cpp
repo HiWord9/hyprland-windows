@@ -467,12 +467,27 @@ std::vector<HWND> SnapshotTouchpadWindows() {
     return g_touchpadAsked;
 }
 
-// Only touched on the server thread: the window the wheel last went to.
+// Only touched on the server thread: the window the wheel last went to, and
+// when. A turn of the wheel stays with its window for as long as it goes on:
+// a window grown or shrunk out from under the cursor is still the one the
+// next notch is for, not whatever the cursor is over now. It ends when the
+// modifier comes up, or when the wheel has rested this long.
 HWND g_wheelRoot;
+DWORD g_wheelAt;
+constexpr DWORD kWheelTurnMs = 500;
 
-// The window the wheel is for: the one under the cursor - unless a window is
-// being moved, which is, wherever the cursor has got to by now.
-HWND WheelTarget(POINT pt) {
+void EndWheelTurn() {
+    g_wheelRoot = nullptr;
+}
+
+// The window the wheel is for: the one the turn is going to, or one being
+// moved, wherever the cursor has got to by now - or else the one under the
+// cursor.
+HWND WheelTarget(POINT pt, DWORD time) {
+    if (g_wheelRoot && time - g_wheelAt < kWheelTurnMs &&
+        IsWindow(g_wheelRoot) && CanScale(g_wheelRoot)) {
+        return g_wheelRoot;
+    }
     HWND under = GetAncestor(WindowFromPoint(pt), GA_ROOT);
     for (HWND candidate : {under, g_wheelRoot}) {
         GUITHREADINFO info{sizeof(info)};
@@ -497,13 +512,14 @@ bool TakeWheel(const MSLLHOOKSTRUCT* info) {
         !IsDragModifierDown()) {
         return false;
     }
-    HWND root = WheelTarget(info->pt);
+    HWND root = WheelTarget(info->pt, info->time);
     DWORD pid = 0;
     GetWindowThreadProcessId(root, &pid);
     if (!(IsShellProcess() || pid == GetCurrentProcessId()) || !CanScale(root)) {
         return false;
     }
     g_wheelRoot = root;
+    g_wheelAt = info->time;
     PostMessageW(root, g_msgDrag, kDragScale, (short)HIWORD(info->mouseData));
     ArmWinMask(g_settings.dragModifier == DragModifier::Win,
                g_settings.dragModifier == DragModifier::Alt);

@@ -246,41 +246,41 @@ bool CanScale(HWND root) {
 
 // Where the steps so far have taken the window, unrounded. The window itself
 // only ever has whole pixels, and a step started from them would let the
-// rounding creep: off the center, and to a size a notch back does not undo.
+// rounding creep: off its place, and to a size a notch back does not undo.
 // Good for as long as the window is where the last step put it.
 struct ScaleState {
     HWND hwnd;
     RECT applied;  // the frame that step left
-    double centerX, centerY, width, height;
+    double left, top, width, height;
 };
 thread_local ScaleState g_scale;
 
 // On the window's own thread. By the step for every notch, either way the
 // same, so that a notch up and one down come back to where they began - and
 // as far as the window lets itself be sized, and no larger than its monitor's
-// work area, which a window keeps its shape by stopping at.
+// work area, which a window keeps its shape by stopping at. Around its center,
+// or the cursor, as the settings have it.
 void ScaleWindow(HWND root, int wheelDelta) {
     if (!wheelDelta || !CanScale(root)) {
         return;
     }
-    RECT window, frame;
+    // The visible frame is what gets scaled and fitted: the invisible borders
+    // around it are the window's, whatever its size.
+    RECT window;
     GetWindowRect(root, &window);
-    // The visible frame is what gets centered and fitted: the invisible
-    // borders around it are the window's, whatever its size.
-    if (FAILED(DwmGetWindowAttribute(root, DWMWA_EXTENDED_FRAME_BOUNDS, &frame,
-                                     sizeof(frame)))) {
-        frame = window;
-    }
-    int frameW = frame.right - frame.left, frameH = frame.bottom - frame.top;
-    int extraW = (window.right - window.left) - frameW;
-    int extraH = (window.bottom - window.top) - frameH;
-    if (frameW <= 0 || frameH <= 0) {
+    RECT inset = FrameInsetOf(root);
+    RECT frame = WindowToFrame(window, inset);
+    int extraW = inset.left - inset.right, extraH = inset.top - inset.bottom;
+    if (frame.right <= frame.left || frame.bottom <= frame.top) {
         return;
     }
     if (g_scale.hwnd != root || !EqualRect(&g_scale.applied, &frame)) {
-        g_scale = {root, frame, (frame.left + frame.right) / 2.0,
-                   (frame.top + frame.bottom) / 2.0, (double)frameW,
-                   (double)frameH};
+        g_scale = {root,
+                   frame,
+                   (double)frame.left,
+                   (double)frame.top,
+                   (double)(frame.right - frame.left),
+                   (double)(frame.bottom - frame.top)};
     }
 
     MINMAXINFO limits{};
@@ -320,17 +320,28 @@ void ScaleWindow(HWND root, int wheelDelta) {
         ScaleDraggedWindow(root, factor);
         return;
     }
+
+    // The point that stays where it is.
+    double anchorX = g_scale.left + g_scale.width / 2;
+    double anchorY = g_scale.top + g_scale.height / 2;
+    POINT cursor;
+    if (g_settings.wheelAnchor == WheelAnchor::Cursor && GetCursorPos(&cursor)) {
+        anchorX = cursor.x;
+        anchorY = cursor.y;
+    }
+    g_scale.left = anchorX - (anchorX - g_scale.left) * factor;
+    g_scale.top = anchorY - (anchorY - g_scale.top) * factor;
     g_scale.width *= factor;
     g_scale.height *= factor;
-    int width = (int)lround(g_scale.width), height = (int)lround(g_scale.height);
-    int left = (int)lround(g_scale.centerX - g_scale.width / 2);
-    int top = (int)lround(g_scale.centerY - g_scale.height / 2);
-    SetWindowPos(root, nullptr, left - (frame.left - window.left),
-                 top - (frame.top - window.top), width + extraW, height + extraH,
+    int left = (int)lround(g_scale.left), top = (int)lround(g_scale.top);
+    RECT target = FrameToWindow(
+        RECT{left, top, left + (int)lround(g_scale.width),
+             top + (int)lround(g_scale.height)},
+        inset);
+    SetWindowPos(root, nullptr, target.left, target.top,
+                 target.right - target.left, target.bottom - target.top,
                  SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER |
                      SWP_NOCOPYBITS);
-    if (FAILED(DwmGetWindowAttribute(root, DWMWA_EXTENDED_FRAME_BOUNDS,
-                                     &g_scale.applied, sizeof(RECT)))) {
-        GetWindowRect(root, &g_scale.applied);
-    }
+    GetWindowRect(root, &window);
+    g_scale.applied = WindowToFrame(window, inset);
 }
