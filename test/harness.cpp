@@ -1958,6 +1958,24 @@ static void TestWinMask() {
           "and left alone when it is for Win");
     g_winMaskArmed = g_maskWin = g_maskAlt = false;
 
+    // Armed on an elevated process's word: the Win press it saw is one this
+    // process never sees down, and the mask holds until it is told.
+    PostMessageW(server, kMaskArm, kMaskForWin | kMaskOnWord, 0);
+    Sleep(150);
+    CHECK(g_winMaskArmed && g_maskWin,
+          "a mask armed on an elevated process's word holds with Win up here");
+    PostMessageW(server, kMaskStandDown, kMaskForWin, 0);
+    Sleep(100);
+    CHECK(!g_winMaskArmed, "until that process says it had the release");
+    PostMessageW(server, kMaskArm, kMaskForWin | kMaskOnWord, 0);
+    Sleep(100);
+    g_maskOnWordSince = GetTickCount() - kMaskOnWordMaxMs - 1;
+    Sleep(150);
+    CHECK(!g_winMaskArmed, "or for no longer than a press is ever held");
+    PostMessageW(server, kMaskArm, kMaskForWin, 0);
+    Sleep(100);
+    CHECK(!g_winMaskArmed, "while armed on its own, Win up here arms nothing");
+
     // A modifier held through a drag repeats into nothing while a button is
     // down - only the ones a drag is done with.
     UINT savedKeepAspect = g_settings.keepAspectVk;
