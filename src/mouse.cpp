@@ -15,6 +15,9 @@
 // arrived. From there on it is an ordinary press - Windows keeps the button
 // state for it and holds the mouse for the window it went to - and the
 // message hook does the rest the way it always does, natively.
+//
+// The window shortcut is simpler: it wants nothing of the press but which
+// window it was over, so that hook takes it as it comes, for any window.
 #include "common.h"
 
 constexpr int kHoleHalf = 1;      // around the cursor's pixel
@@ -344,15 +347,36 @@ int ButtonIndex(WPARAM wParam, DWORD mouseData) {
     return -1;
 }
 
-// Would the message hook take this press, if it saw it?
+// Would the message hook take this press for a drag, if it saw it?
 bool WantsPress(int button, HWND root) {
+    return button < 2 && IsDragModifierDown() && IsFrameWindow(root);
+}
+
+// Only ever touched on the server thread: the button of a shortcut press
+// taken here, whose release goes with it; -1 for none.
+int g_shortcutButton = -1;
+
+// The window shortcut needs nothing of the press but where it was, so it is
+// asked of the window under the cursor right from here, for whatever window
+// that is. A press only reaches the message hook once the window takes it as
+// a message, and not every one does: Task Manager's title bar takes its
+// presses past every queue, and a window busy enough to open a hole late
+// loses them to the Start menu, the Win key let go of by then.
+bool TakeShortcutPress(int button, POINT pt) {
     Hotkey shortcut = g_settings.windowShortcut;
     WindowAction action = g_settings.windowShortcutAction;
-    if (action != WindowAction::None &&
-        MatchesShortcut(shortcut, kButtonVk[button], true)) {
-        return CanTakeAction(root, action);
+    if (action == WindowAction::None ||
+        !MatchesShortcut(shortcut, kButtonVk[button], true)) {
+        return false;
     }
-    return button < 2 && IsDragModifierDown() && IsFrameWindow(root);
+    HWND root = GetAncestor(WindowFromPoint(pt), GA_ROOT);
+    if (!CanTakeAction(root, action)) {
+        return false;  // desktop, taskbar, menus... - a normal click
+    }
+    ArmWinMask(shortcut.win, shortcut.alt);
+    RequestWindowAction(root, action);
+    g_shortcutButton = button;
+    return true;
 }
 
 // Only ever touched on the server thread: a press taken and not pressed again
@@ -567,6 +591,13 @@ LRESULT CALLBACK LowLevelMouseProc(int code, WPARAM wParam, LPARAM lParam) {
             }
         }
     } else if (info->dwExtraInfo != kInjectedMarker) {
+        if (down && TakeShortcutPress(button, info->pt)) {
+            return 1;
+        }
+        if (!down && button == g_shortcutButton) {
+            g_shortcutButton = -1;
+            return 1;
+        }
         if (down) {
             HWND hwnd = WindowFromPoint(info->pt);
             HWND root = GetAncestor(hwnd, GA_ROOT);

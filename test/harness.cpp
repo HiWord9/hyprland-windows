@@ -3146,6 +3146,28 @@ static void TestGestures() {
     Pump(400);
     CHECK(IsZoomed(target), "and the action ran on the window under it");
 
+    // And in the low-level hook, which a press reaches whether or not the
+    // window under it ever takes it as a message - Task Manager's title bar
+    // takes its presses past every queue.
+    ShowWindow(target, SW_RESTORE);
+    Pump(300);
+    RECT targetRect;
+    GetWindowRect(target, &targetRect);
+    MSLLHOOKSTRUCT ll{};
+    ll.pt = {(targetRect.left + targetRect.right) / 2,
+             (targetRect.top + targetRect.bottom) / 2};
+    ll.time = GetTickCount();
+    CHECK(LowLevelMouseProc(HC_ACTION, WM_MBUTTONDOWN, (LPARAM)&ll) == 1,
+          "the low-level hook takes a bound middle press itself");
+    CHECK(LowLevelMouseProc(HC_ACTION, WM_MBUTTONUP, (LPARAM)&ll) == 1,
+          "and the release that follows it");
+    CHECK(LowLevelMouseProc(HC_ACTION, WM_MBUTTONUP, (LPARAM)&ll) != 1,
+          "but only that one release");
+    Pump(400);
+    CHECK(IsZoomed(target), "and the action ran on the window under the cursor");
+    ShowWindow(target, SW_RESTORE);
+    Pump(300);
+
     g_settings.windowShortcut = Hotkey{VK_MBUTTON, true, false, false, false};
     MSG bare{target, WM_MBUTTONDOWN, 0, 0, 0, {}};
     ProcessRetrievedMessage(&bare);
