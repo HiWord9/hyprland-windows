@@ -50,6 +50,8 @@ std::atomic<bool> g_winMaskArmed{false};
 
 constexpr WCHAR kKeyboardServerClass[] = L"HyprlandWindowsKeyboard_" WH_MOD_ID;
 constexpr UINT kMaskArm = WM_APP + 1;  // posted to the server: arm for this press
+// Posted to the server: a mask in an elevated process has had the release.
+constexpr UINT kMaskStandDown = WM_APP + 2;
 constexpr UINT kMaskPollMs = 30;
 constexpr UINT_PTR kMaskTimerId = 1;
 constexpr DWORD kServerStartWaitMs = 2000;
@@ -77,6 +79,18 @@ bool WinKeyDown() {
 // keys of a XAML app. Only ever touched on the server thread.
 bool g_maskWin, g_maskAlt;
 constexpr WPARAM kMaskForWin = 1, kMaskForAlt = 2;
+
+HWND FindKeyboardServer();
+
+// A key pressed while an elevated window is in front is never seen down by
+// the processes below it, not even once that window is gone: an elevated
+// process arming the shell's mask says the keys are down (kMaskOnWord), and
+// the mask takes its word for it - until a release has been masked, here or
+// there, or for no longer than a press is ever held.
+constexpr WPARAM kMaskOnWord = 4;
+constexpr DWORD kMaskOnWordMaxMs = 10000;
+bool g_maskOnWord;
+DWORD g_maskOnWordSince;
 
 bool AltKeyDown() {
     return (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
@@ -164,6 +178,15 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
             input[2].ki.dwFlags = KEYEVENTF_KEYUP;
             input[2].ki.dwExtraInfo = kInjectedMarker;
             SendInput(ARRAYSIZE(input), input, sizeof(INPUT));
+            // The shell's mask, armed on this process's word, never sees
+            // this release go by: it is told.
+            if (IsElevatedProcess()) {
+                HWND shell = FindKeyboardServer();
+                if (shell && shell != g_keyboardServer) {
+                    PostMessageW(shell, kMaskStandDown,
+                                 isWin ? kMaskForWin : kMaskForAlt, 0);
+                }
+            }
             return 1;  // swallow the physical key-up
         }
     }
@@ -215,6 +238,7 @@ void UpdateKeyboardHook() {
 void DisarmMask(HWND hwnd) {
     g_winMaskArmed = false;
     g_maskWin = g_maskAlt = false;
+    g_maskOnWord = false;
     KillTimer(hwnd, kMaskTimerId);
     UpdateKeyboardHook();
 }
@@ -222,11 +246,16 @@ void DisarmMask(HWND hwnd) {
 void ArmMask(HWND hwnd, WPARAM keys) {
     // A press that is already over gets none: a mask armed for it now would
     // be left for the next one.
-    g_maskWin |= (keys & kMaskForWin) && WinKeyDown();
-    g_maskAlt |= (keys & kMaskForAlt) && AltKeyDown();
+    bool onWord = (keys & kMaskOnWord) != 0;
+    g_maskWin |= (keys & kMaskForWin) && (onWord || WinKeyDown());
+    g_maskAlt |= (keys & kMaskForAlt) && (onWord || AltKeyDown());
     if (g_uninitializing || !(g_maskWin || g_maskAlt)) {
         g_maskWin = g_maskAlt = false;
         return;
+    }
+    if (onWord) {
+        g_maskOnWord = true;
+        g_maskOnWordSince = GetTickCount();
     }
     g_winMaskArmed = true;
     UpdateKeyboardHook();
@@ -273,11 +302,25 @@ LRESULT CALLBACK KeyboardServerProc(HWND hwnd, UINT msg, WPARAM wParam,
             // The hook takes the mask down when it masks a release. A release
             // can also go by without reaching it at all, and a mask that
             // outlived its press would swallow the next one - so the key being
-            // up is what ends it.
-            g_maskWin = g_maskWin && WinKeyDown();
-            g_maskAlt = g_maskAlt && AltKeyDown();
+            // up is what ends it - or, armed on an elevated process's word, a
+            // release masked there, or the longest a press is ever held.
+            if (g_maskOnWord &&
+                GetTickCount() - g_maskOnWordSince > kMaskOnWordMaxMs) {
+                g_maskOnWord = false;
+            }
+            g_maskWin = g_maskWin && (g_maskOnWord || WinKeyDown());
+            g_maskAlt = g_maskAlt && (g_maskOnWord || AltKeyDown());
             if (!g_winMaskArmed || !(g_maskWin || g_maskAlt)) {
                 DisarmMask(hwnd);
+            }
+            return 0;
+        case kMaskStandDown:
+            if (g_maskOnWord) {
+                g_maskWin = g_maskWin && !(wParam & kMaskForWin);
+                g_maskAlt = g_maskAlt && !(wParam & kMaskForAlt);
+                if (!(g_maskWin || g_maskAlt)) {
+                    DisarmMask(hwnd);
+                }
             }
             return 0;
     }
@@ -315,6 +358,8 @@ DWORD WINAPI KeyboardServerThread(LPVOID param) {
     if (hwnd) {
         // Gestures in processes of any integrity level ask for a mask here.
         ChangeWindowMessageFilterEx(hwnd, kMaskArm, MSGFLT_ALLOW, nullptr);
+        ChangeWindowMessageFilterEx(hwnd, kMaskStandDown, MSGFLT_ALLOW,
+                                    nullptr);
     }
     {
         std::lock_guard<std::mutex> lock(g_serverMutex);
@@ -488,20 +533,20 @@ void ArmWinMask(bool usingWin, bool usingAlt) {
     if (!server) {
         server = StartServer();
     }
-    if (!server || !PostMessageW(server, kMaskArm, keys, 0)) {
-        Wh_Log(L"No Start menu mask to arm (%u)", GetLastError());
-    }
     // Windows keeps the keys typed into an elevated window - Task Manager,
     // anything run as administrator - from the low-level hooks of the
     // processes below it, the shell's included. Such a process arms a mask
-    // of its own as well, which sees them. The shell's stays armed too: if
-    // the gesture closed the process's last window, the release goes to
-    // whatever window comes forward next.
-    if (IsElevatedProcess()) {
-        HWND own = StartServer();
-        if (own && own != server) {
-            PostMessageW(own, kMaskArm, keys, 0);
-        }
+    // of its own as well, which sees them. The shell's is armed too, on this
+    // process's word that the keys are down, since it cannot tell: if the
+    // gesture closed the process's last window, the release goes to whatever
+    // window comes forward next.
+    HWND own = IsElevatedProcess() ? StartServer() : nullptr;
+    WPARAM word = own && own != server ? kMaskOnWord : 0;
+    if (!server || !PostMessageW(server, kMaskArm, keys | word, 0)) {
+        Wh_Log(L"No Start menu mask to arm (%u)", GetLastError());
+    }
+    if (own && own != server) {
+        PostMessageW(own, kMaskArm, keys, 0);
     }
 }
 
