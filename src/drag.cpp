@@ -34,6 +34,23 @@ bool IsDragModifierDown() {
            0;
 }
 
+// The other one of Win and Alt, held along with the modifier: the left button
+// then resizes, for a touchpad, whose right button can be clicked but not held
+// down through a drag. Not while Alt is a key of the drag's own already, for
+// the shape or the magnet.
+bool IsLeftResizeDown() {
+    if (!g_settings.leftResize || !IsDragModifierDown()) {
+        return false;
+    }
+    if (g_settings.dragModifier == DragModifier::Alt) {
+        return ((GetAsyncKeyState(VK_LWIN) | GetAsyncKeyState(VK_RWIN)) &
+                0x8000) != 0;
+    }
+    return g_settings.keepAspectVk != VK_MENU &&
+           g_settings.snapModifierVk != VK_MENU &&
+           (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+}
+
 // Whether a system move/resize loop is running on a thread.
 bool IsThreadInMoveSizeLoop(DWORD threadId) {
     GUITHREADINFO info{sizeof(info)};
@@ -299,7 +316,9 @@ bool StartResizeRelease(HWND root) {
     return true;
 }
 
-bool StartResize(HWND root, POINT pt, MSG* msg) {
+// With the left button held for it instead, the loop has the button it wants
+// and ends on its release, the way a move does: nothing to wait for or post.
+bool StartResize(HWND root, POINT pt, MSG* msg, bool byLeft) {
     if (IsIconic(root) || IsZoomed(root)) {
         return false;
     }
@@ -310,14 +329,16 @@ bool StartResize(HWND root, POINT pt, MSG* msg) {
     if (!GetWindowRect(root, &rc)) {
         return false;
     }
-    if (!(GetAsyncKeyState(PhysicalButtonVk(true)) & 0x8000)) {
+    if (!(GetAsyncKeyState(PhysicalButtonVk(!byLeft)) & 0x8000)) {
         return false;  // released already; the loop would stick to the cursor
     }
-    if (!StartResizeRelease(root)) {
-        return false;  // nothing would end the loop
+    if (!byLeft) {
+        if (!StartResizeRelease(root)) {
+            return false;  // nothing would end the loop
+        }
+        g_pendingRelease = true;
     }
 
-    g_pendingRelease = true;
     ForceLeftButtonDown();
     msg->message = WM_SYSCOMMAND;
     msg->wParam = SC_SIZE | ResizeEdgeForPoint(rc, pt);
@@ -384,10 +405,8 @@ DWORD WINAPI PressWatchThread(LPVOID param) {
     return 0;
 }
 
-bool HoldPress(HWND root, const MSG* msg, bool right) {
-    auto* watch = new PressWatch{root, msg->pt,
-                                 right ? (WPARAM)kDragResize : kDragMove,
-                                 PhysicalButtonVk(right)};
+bool HoldPress(HWND root, const MSG* msg, bool right, WPARAM kind) {
+    auto* watch = new PressWatch{root, msg->pt, kind, PhysicalButtonVk(right)};
     if (!StartModThread(PressWatchThread, watch)) {
         delete watch;
         return false;
@@ -557,16 +576,17 @@ bool HandleDragRequest(MSG* msg) {
     // Kept, because starting the drag is what overwrites it with the system
     // command the loop needs.
     WPARAM kind = msg->wParam;
-    bool started = kind == kDragResize ? StartResize(root, pt, msg)
-                                       : StartMove(root, pt, msg);
+    bool resize = kind == kDragResize || kind == kDragResizeLeft;
+    bool started = resize ? StartResize(root, pt, msg, kind == kDragResizeLeft)
+                          : StartMove(root, pt, msg);
     if (started) {
         // A held press is a drag after all, and the release is the loop's -
-        // or, for a resize, the mod's to swallow.
+        // or, for a resize with the right button, the mod's to swallow.
         g_heldPress[kind == kDragResize].active = false;
         if (kind == kDragResize) {
             g_swallowButtonUp[1] = true;
         }
-        BeginDragSnap(root, kind, pt);
+        BeginDragSnap(root, resize ? kDragResize : kDragMove, pt);
         BeginDragFade(root, kind);
     }
     return started;
@@ -602,27 +622,32 @@ bool HandleModifierButtonDown(const MSG* msg, bool right) {
         return false;  // desktop, taskbar, menus... - normal click
     }
 
+    bool byLeft = !right && IsLeftResizeDown();
+    // Both keys are part of a resize with the left button, and either let go
+    // of alone would be a tap of its own.
+    bool usingWin = byLeft || g_settings.dragModifier == DragModifier::Win;
+    bool usingAlt = byLeft || g_settings.dragModifier == DragModifier::Alt;
+
     // The second press of a double click is a gesture of its own rather than
     // another drag. The first one has already started a drag by then, which
     // is what a double click on a title bar does in Windows as well.
     WindowAction action = g_settings.doubleClickAction;
-    if (!right && action != WindowAction::None &&
+    if (!right && !byLeft && action != WindowAction::None &&
         IsDoubleClickAt(root, msg->pt, GetTickCount())) {
         Wh_Log(L"Double click on %p", root);
-        ArmWinMask(g_settings.dragModifier == DragModifier::Win,
-                   g_settings.dragModifier == DragModifier::Alt);
+        ArmWinMask(usingWin, usingAlt);
         g_swallowButtonUp[0] = true;  // we took the press, so its release too
         RequestWindowAction(root, action);
         return true;
     }
 
-    Wh_Log(L"%s %p", right ? L"Resize" : L"Move", root);
-    ArmWinMask(g_settings.dragModifier == DragModifier::Win,
-               g_settings.dragModifier == DragModifier::Alt);
+    WPARAM kind = right ? kDragResize : byLeft ? kDragResizeLeft : kDragMove;
+    Wh_Log(L"%s %p", kind == kDragMove ? L"Move" : L"Resize", root);
+    ArmWinMask(usingWin, usingAlt);
 
     if (ClickGoesToApp()) {
         // Swallowed for now, and handed back if the mouse doesn't move.
-        return HoldPress(root, msg, right);
+        return HoldPress(root, msg, right, kind);
     }
     if (right) {
         // We consumed the right button-down, so swallow its matching up too:
@@ -630,9 +655,9 @@ bool HandleModifierButtonDown(const MSG* msg, bool right) {
         // physical right-up, which would otherwise reach the app.
         g_swallowButtonUp[1] = true;
     }
-    // The move loop consumes the physical left-up itself, so a move leaves
-    // nothing to swallow.
-    RequestDrag(root, right ? kDragResize : kDragMove, msg->pt);
+    // The loop consumes the physical left-up itself, so a drag with the left
+    // button leaves nothing to swallow.
+    RequestDrag(root, kind, msg->pt);
     return true;
 }
 

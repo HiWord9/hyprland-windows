@@ -9,7 +9,8 @@ Window handling the way [Hyprland](https://hypr.land/) does it, on Windows.
 * **Win + left mouse button** — drag a window from anywhere on it, not just by
   its title bar.
 * **Win + right mouse button** — resize a window from anywhere on it, from
-  whichever corner is closest to the cursor.
+  whichever corner is closest to the cursor. **Win + Alt + left mouse button**
+  does the same, which a touchpad can hold through a drag.
 * **Win + mouse wheel** — make a window larger or smaller, around its center or
   the cursor; two fingers on a touchpad do it too.
 * **Win + double click** — maximize a window, or restore it. The title bar is

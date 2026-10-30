@@ -109,11 +109,13 @@ bool IsDragKey(DWORD vk) {
     switch (vk) {
         case VK_LWIN:
         case VK_RWIN:
-            return g_settings.dragModifier == DragModifier::Win;
+            return g_settings.dragModifier == DragModifier::Win ||
+                   g_settings.leftResize;
         case VK_LMENU:
         case VK_RMENU:
             return g_settings.dragModifier == DragModifier::Alt ||
-                   keepAspect == VK_MENU || snap == VK_MENU;
+                   g_settings.leftResize || keepAspect == VK_MENU ||
+                   snap == VK_MENU;
         case VK_LCONTROL:
         case VK_RCONTROL:
             return keepAspect == VK_CONTROL || snap == VK_CONTROL;

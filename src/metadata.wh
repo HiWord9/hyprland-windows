@@ -22,7 +22,8 @@ Window handling the way Hyprland does it, on Windows.
 * **Win + left mouse button** - drag a window from anywhere on it, not just by
   its title bar.
 * **Win + right mouse button** - resize a window from anywhere on it, from
-  whichever corner is closest to the cursor.
+  whichever corner is closest to the cursor. **Win + Alt + left mouse button**
+  does the same, which a touchpad can hold through a drag.
 * **Win + mouse wheel** - make a window larger or smaller, around its center or
   the cursor; two fingers on a touchpad do it too.
 * **Win + double click** - maximize a window, or restore it. The title bar is
@@ -105,6 +106,13 @@ feedback is welcome.
     $options:
     - win: Win (Super)
     - alt: Alt
+  - leftResize: true
+    $name: Resize with the left button too
+    $description: >-
+      With the other one of Win and Alt held as well, dragging with the left
+      button resizes the window instead of moving it - for a touchpad, where
+      the right button can't be held down through a drag. Not while Alt is
+      also the key for keeping the shape or for the magnet.
   - keepAspect: shift
     $name: Keep the shape while resizing
     $description: >-

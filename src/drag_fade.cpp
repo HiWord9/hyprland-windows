@@ -171,7 +171,7 @@ void BeginDragFade(HWND root, WPARAM kind) {
     }
     // A resize is the one drag you may want to watch reflow as it happens,
     // rather than through the window.
-    if (mode == DragTranslucency::MoveOnly && kind == kDragResize) {
+    if (mode == DragTranslucency::MoveOnly && kind != kDragMove) {
         return;
     }
 

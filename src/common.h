@@ -133,6 +133,8 @@ struct Settings {
     std::atomic<WindowAction> windowShortcutAction{WindowAction::Close};
     std::atomic<DragModifier> dragModifier{DragModifier::Win};
     std::atomic<ModifierClick> modifierClick{ModifierClick::Auto};
+    // The other one of Win and Alt held as well: the left button resizes.
+    std::atomic<bool> leftResize{true};
     std::atomic<bool> topEdgeResize{false};
     std::atomic<WindowAction> doubleClickAction{WindowAction::ToggleMaximize};
     std::atomic<int> doubleClickTime{0};  // 0: the Windows double-click speed
@@ -331,6 +333,9 @@ enum DragKind : WPARAM {
     // Sent by the teardown: a subclass waiting for a touchpad's question,
     // taken off - see mouse.cpp.
     kDragUntouch = 8,
+    // A resize, with the left button held rather than the right - see
+    // drag.cpp.
+    kDragResizeLeft = 9,
 };
 
 // How long the thread that ends a resize waits for its loop to start. The
@@ -339,6 +344,7 @@ enum DragKind : WPARAM {
 constexpr int kMoveSizeStartWaitMs = 500;
 
 bool IsDragModifierDown();
+bool IsLeftResizeDown();
 LRESULT CALLBACK LowLevelMouseProc(int code, WPARAM wParam, LPARAM lParam);
 bool HasCompositionContentWindow();
 void EndWheelTurn();

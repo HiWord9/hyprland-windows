@@ -1333,6 +1333,29 @@ static void TestMoveResize() {
           "top-left resize moved the top-left corner by the delta (%ld,%ld)",
           r3.left - r2.left, r3.top - r2.top);
 
+    // The same with the left button held for it, as a touchpad does: the
+    // loop has its button for real and ends on its release, with no release
+    // of the mod's and nothing left to swallow.
+    POINT l{r3.right - 70, r3.bottom - 50};
+    DragWith(false, hwnd, l, {70, 50}, kDragResizeLeft);
+    PumpRaw(100);
+    RECT rl;
+    GetWindowRect(hwnd, &rl);
+    PrintRects("after resize with the left button", hwnd);
+    CHECK(rl.left == r3.left && rl.top == r3.top,
+          "a resize with the left button keeps the far corner");
+    CHECK(rl.right == r3.right + 70 && rl.bottom == r3.bottom + 50,
+          "and grows by the drag delta (%ld,%ld)", rl.right - r3.right,
+          rl.bottom - r3.bottom);
+    CHECK(!g_pendingRelease, "with no release of the mod's waiting");
+    DragWith(false, hwnd, {rl.right - 40, rl.bottom - 40}, {60, 60},
+             kDragResizeLeft, /*cancel=*/true);
+    PumpRaw(100);
+    RECT rlc;
+    GetWindowRect(hwnd, &rlc);
+    CHECK(EqualRect(&rlc, &rl), "and Esc puts its size back");
+    r3 = rl;
+
     // Drag a maximized window: it should restore and follow the cursor.
     ShowWindow(hwnd, SW_MAXIMIZE);
     PumpRaw(400);

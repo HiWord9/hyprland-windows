@@ -315,6 +315,7 @@ void LoadSettings() {
                                   : DragModifier::Win;
     WindhawkUtils::StringSetting click(Wh_GetStringSetting(L"drag.click"));
     g_settings.modifierClick = ParseModifierClick(click);
+    g_settings.leftResize = Wh_GetIntSetting(L"drag.leftResize") != 0;
 
     g_settings.topEdgeResize = Wh_GetIntSetting(L"titleBar.topEdgeResize") != 0;
 
