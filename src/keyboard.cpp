@@ -133,6 +133,33 @@ bool IsModifierRepeatDuringPress(DWORD vk) {
             0x8000);
 }
 
+// Esc with Alt held is Alt+Esc to Windows - the window sent to the back and
+// the next one brought forward - well before a drag gets to see it as the Esc
+// that cancels it. A drag with Alt as the modifier holds Alt, and so does a
+// resize with Win + Alt. So while a move or size loop runs in the window in
+// front with Alt held, the Esc goes to the loop itself, as a plain one, and
+// its release goes nowhere. Only ever touched on the server thread.
+bool g_escForLoop;
+
+bool HandleEscInAltDrag(bool keyUp) {
+    if (keyUp) {
+        return std::exchange(g_escForLoop, false);
+    }
+    if (!(GetAsyncKeyState(VK_MENU) & 0x8000)) {
+        return false;
+    }
+    GUITHREADINFO gui{sizeof(gui)};
+    HWND front = GetForegroundWindow();
+    if (!front ||
+        !GetGUIThreadInfo(GetWindowThreadProcessId(front, nullptr), &gui) ||
+        !(gui.flags & GUI_INMOVESIZE) || !gui.hwndMoveSize ||
+        !PostMessageW(gui.hwndMoveSize, WM_KEYDOWN, VK_ESCAPE, 1)) {
+        return false;
+    }
+    g_escForLoop = true;
+    return true;
+}
+
 LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
     ModRef ref;  // the image must not go away under this procedure
 
@@ -143,6 +170,9 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
     bool keyUp = wParam == WM_KEYUP || wParam == WM_SYSKEYUP;
     bool ours = info->dwExtraInfo == kInjectedMarker;
     if (!ours && !keyUp && IsModifierRepeatDuringPress(info->vkCode)) {
+        return 1;
+    }
+    if (!ours && info->vkCode == VK_ESCAPE && HandleEscInAltDrag(keyUp)) {
         return 1;
     }
     if (!ours && !keyUp) {
