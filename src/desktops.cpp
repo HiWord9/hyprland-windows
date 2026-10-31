@@ -205,17 +205,34 @@ BOOL CALLBACK CollectDesktopProc(HWND hwnd, LPARAM lParam) {
 // as well; while it opens, the window is in front a moment before it is shown.
 // The little one that shows a desktop's name after every switch is a view
 // too, but one that never takes the focus, and it is not what this is about.
-// They are looked for by class: EnumWindows passes over them altogether.
-// Windows 10's are of a class of their own.
+// They are looked for by class. EnumWindows passes over them altogether, and
+// FindWindowEx over Task View once it is up, in front - so the window in front
+// is asked first. Windows 10's are of a class of their own.
+constexpr PCWSTR kShellViewClasses[] = {L"XamlExplorerHostIslandWindow",
+                                        L"MultitaskingViewFrame"};
+
+bool IsShellViewClass(HWND hwnd) {
+    WCHAR cls[64];
+    if (!hwnd || !GetClassNameW(hwnd, cls, ARRAYSIZE(cls))) {
+        return false;
+    }
+    for (PCWSTR viewClass : kShellViewClasses) {
+        if (_wcsicmp(cls, viewClass) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool ShellViewUp() {
-    HWND foreground = GetForegroundWindow();
-    for (PCWSTR viewClass :
-         {L"XamlExplorerHostIslandWindow", L"MultitaskingViewFrame"}) {
+    if (IsShellViewClass(GetForegroundWindow())) {
+        return true;
+    }
+    for (PCWSTR viewClass : kShellViewClasses) {
         HWND view = nullptr;
         while ((view = FindWindowExW(nullptr, view, viewClass, nullptr))) {
-            if (view == foreground ||
-                (IsWindowVisible(view) &&
-                 !(GetWindowLongPtrW(view, GWL_EXSTYLE) & WS_EX_NOACTIVATE))) {
+            if (IsWindowVisible(view) &&
+                !(GetWindowLongPtrW(view, GWL_EXSTYLE) & WS_EX_NOACTIVATE)) {
                 return true;
             }
         }
