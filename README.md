@@ -108,6 +108,7 @@ and assembled into that single file:
 | `src/titlebar.cpp` | hiding/restoring a title bar and the per-window bookkeeping |
 | `src/hotkey.cpp` | the key bindings: the title-bar hotkey, and the window shortcut when it is a key |
 | `src/keyboard.cpp` | the mod's keyboard thread: keeping the Start menu shut after a `Win` + gesture, and the key bindings ahead of Windows' own shortcuts |
+| `src/mouse.cpp` | the low-level mouse hook on that thread: presses over WinUI and XAML content, the mouse wheel, and two fingers on a touchpad |
 | `src/desktops.cpp` | `Win`+`Tab` through the virtual desktops |
 | `src/drag.cpp` | `Win` + mouse move and resize |
 | `src/drag_fade.cpp` | fading a window to translucent while it is dragged |
