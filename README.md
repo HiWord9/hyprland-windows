@@ -4,7 +4,7 @@
 
 Window handling the way [Hyprland](https://hypr.land/) does it, on Windows.
 
-![Hyprland Windows in action](https://raw.githubusercontent.com/HiWord9/hyprland-windows/extra/demo/1.1.0.gif)
+![Hyprland Windows in action](https://raw.githubusercontent.com/HiWord9/hyprland-windows/extra/demo/1.2.0.gif)
 
 * **Win + left mouse button** — drag a window from anywhere on it, not just by
   its title bar.
