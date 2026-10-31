@@ -134,7 +134,7 @@ struct Settings {
     std::atomic<DragModifier> dragModifier{DragModifier::Win};
     std::atomic<ModifierClick> modifierClick{ModifierClick::Auto};
     // The other one of Win and Alt held as well: the left button resizes.
-    std::atomic<bool> leftResize{true};
+    std::atomic<bool> leftResize{false};
     std::atomic<bool> topEdgeResize{false};
     std::atomic<WindowAction> doubleClickAction{WindowAction::ToggleMaximize};
     std::atomic<int> doubleClickTime{0};  // 0: the Windows double-click speed
