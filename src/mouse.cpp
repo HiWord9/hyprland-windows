@@ -313,7 +313,9 @@ void UncoverAndPress(HWND root, const MSG* msg) {
     input.mi.mouseData = HIWORD(msg->lParam);
     input.mi.dwExtraInfo = kReplayMarker;
     SetThreadDpiAwarenessContext(previous);
-    SendInput(1, &input, sizeof(input));
+    if (!SendInput(1, &input, sizeof(input))) {
+        RestoreUncovered();  // no press is coming to close it
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -347,9 +349,11 @@ int ButtonIndex(WPARAM wParam, DWORD mouseData) {
     return -1;
 }
 
-// Would the message hook take this press for a drag, if it saw it?
-bool WantsPress(int button, HWND root) {
-    return button < 2 && IsDragModifierDown() && IsFrameWindow(root);
+// Would the message hook take a press of this button for a drag, over a
+// window it can drag? Asked first, before anything about where the press is:
+// every click on the system comes by here.
+bool WantsButton(int button) {
+    return button < 2 && IsDragModifierDown();
 }
 
 // Only ever touched on the server thread: the button of a shortcut press
@@ -598,7 +602,7 @@ LRESULT CALLBACK LowLevelMouseProc(int code, WPARAM wParam, LPARAM lParam) {
             g_shortcutButton = -1;
             return 1;
         }
-        if (down) {
+        if (down && WantsButton(button)) {
             HWND hwnd = WindowFromPoint(info->pt);
             HWND root = GetAncestor(hwnd, GA_ROOT);
             // An elevated process takes the presses on its own windows, the
@@ -606,13 +610,14 @@ LRESULT CALLBACK LowLevelMouseProc(int code, WPARAM wParam, LPARAM lParam) {
             DWORD pid = 0;
             GetWindowThreadProcessId(root, &pid);
             if ((IsShellProcess() || pid == GetCurrentProcessId()) &&
-                CompositionContentAt(hwnd, info->pt) &&
-                WantsPress(button, root)) {
+                IsFrameWindow(root) && CompositionContentAt(hwnd, info->pt)) {
                 taken = {true, false, info->time, root};
                 PostMessageW(root, g_msgDrag, kDragUncover,
                              MAKELPARAM(kDownFlag[button], kXButton[button]));
                 return 1;
             }
+            taken.active = false;
+        } else if (down) {
             taken.active = false;
         } else if (taken.active) {
             taken.released = true;

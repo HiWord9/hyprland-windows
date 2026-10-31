@@ -100,9 +100,9 @@ bool AltKeyDown() {
 // queue keeps the mouse moves on either side of it from merging into one: a
 // window slow to resize then takes a step for every move the mouse made, and
 // catches up long after it has stopped. Nothing does anything with a repeated
-// modifier, so the repeats of the ones a drag is done with go while a mouse
-// button is held. A repeat is a press of a key that is down already - this
-// hook is called before Windows has taken the press in.
+// modifier, so the repeats of the ones a drag is done with go while a move or
+// size loop runs in the window in front. A repeat is a press of a key that is
+// down already - this hook is called before Windows has taken the press in.
 bool IsDragKey(DWORD vk) {
     UINT keepAspect = g_settings.keepAspectVk;
     UINT snap = g_settings.snapModifierVk;
@@ -126,11 +126,24 @@ bool IsDragKey(DWORD vk) {
     return false;
 }
 
-bool IsModifierRepeatDuringPress(DWORD vk) {
+// The window of the move or size loop running in the window in front, if one
+// is.
+HWND ForegroundMoveSizeWindow() {
+    GUITHREADINFO gui{sizeof(gui)};
+    HWND front = GetForegroundWindow();
+    if (!front ||
+        !GetGUIThreadInfo(GetWindowThreadProcessId(front, nullptr), &gui) ||
+        !(gui.flags & GUI_INMOVESIZE)) {
+        return nullptr;
+    }
+    return gui.hwndMoveSize;
+}
+
+bool IsModifierRepeatDuringDrag(DWORD vk) {
     return IsDragKey(vk) && (GetAsyncKeyState(vk) & 0x8000) &&
-           ((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON) |
-             GetAsyncKeyState(VK_MBUTTON)) &
-            0x8000);
+           ((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON)) &
+            0x8000) &&
+           ForegroundMoveSizeWindow();
 }
 
 // Esc with Alt held is Alt+Esc to Windows - the window sent to the back and
@@ -148,12 +161,8 @@ bool HandleEscInAltDrag(bool keyUp) {
     if (!(GetAsyncKeyState(VK_MENU) & 0x8000)) {
         return false;
     }
-    GUITHREADINFO gui{sizeof(gui)};
-    HWND front = GetForegroundWindow();
-    if (!front ||
-        !GetGUIThreadInfo(GetWindowThreadProcessId(front, nullptr), &gui) ||
-        !(gui.flags & GUI_INMOVESIZE) || !gui.hwndMoveSize ||
-        !PostMessageW(gui.hwndMoveSize, WM_KEYDOWN, VK_ESCAPE, 1)) {
+    HWND loop = ForegroundMoveSizeWindow();
+    if (!loop || !PostMessageW(loop, WM_KEYDOWN, VK_ESCAPE, 1)) {
         return false;
     }
     g_escForLoop = true;
@@ -169,7 +178,7 @@ LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
     auto* info = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
     bool keyUp = wParam == WM_KEYUP || wParam == WM_SYSKEYUP;
     bool ours = info->dwExtraInfo == kInjectedMarker;
-    if (!ours && !keyUp && IsModifierRepeatDuringPress(info->vkCode)) {
+    if (!ours && !keyUp && IsModifierRepeatDuringDrag(info->vkCode)) {
         return 1;
     }
     if (!ours && info->vkCode == VK_ESCAPE && HandleEscInAltDrag(keyUp)) {

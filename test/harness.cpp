@@ -1999,8 +1999,10 @@ static void TestWinMask() {
     Sleep(100);
     CHECK(!g_winMaskArmed, "while armed on its own, Win up here arms nothing");
 
-    // A modifier held through a drag repeats into nothing while a button is
-    // down - only the ones a drag is done with.
+    // A modifier held through a drag repeats into nothing while a move or
+    // size loop runs in front - only the ones a drag is done with.
+    CHECK(!ForegroundMoveSizeWindow() && !IsModifierRepeatDuringDrag(VK_LWIN),
+          "with no loop in front, every repeat goes through");
     UINT savedKeepAspect = g_settings.keepAspectVk;
     UINT savedSnapKey = g_settings.snapModifierVk;
     g_settings.keepAspectVk = VK_SHIFT;
