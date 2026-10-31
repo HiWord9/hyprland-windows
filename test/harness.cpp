@@ -2556,11 +2556,21 @@ static void TestDesktops(bool noInput) {
     if (ElevatedInFront()) {
         NotCheckedForElevated("Win+Ctrl+Tab");
     } else {
+        auto frontClass = [] {
+            static WCHAR cls[64];
+            cls[0] = 0;
+            GetClassNameW(GetForegroundWindow(), cls, ARRAYSIZE(cls));
+            return cls;
+        };
+        printf("  in front before Win+Ctrl+Tab: %ls\n", frontClass());
         pressCtrlWinTab();
         bool opened = false;
         for (int i = 0; i < 150 && !opened; i++) {
             Sleep(10);
             opened = ShellViewUp();
+        }
+        if (!opened) {
+            printf("  and after it: %ls\n", frontClass());
         }
         CHECK(opened, "Win+Ctrl+Tab opens Task View");
         if (opened) {
@@ -3100,9 +3110,12 @@ static void TestWheelScale() {
     stream.join();
     int streamW = (int)lround((streamStart.right - streamStart.left) *
                               pow(1.1, total / (double)WHEEL_DELTA));
+    // The last step may come a step's time after the last turn, and the
+    // timer for it, and the clock measuring it, both go by the system tick.
+    constexpr long kTickMs = 16;
     CHECK(sizes <= 400 / 40 + 2 &&
               abs((seen.right - seen.left) - streamW) <= 1 &&
-              (long)(lastChange - lastPost) <= 60,
+              (long)(lastChange - lastPost) <= (long)kScaleStepMs + 2 * kTickMs,
           "a stream of small turns is taken in steps the window can draw "
           "(%d of them), to where the stream takes it (%ld wide, %d expected), "
           "%ld ms after it",
