@@ -24,8 +24,8 @@ Window handling the way [Hyprland](https://hypr.land/) does it, on Windows.
   the title bar back.
 * **Win+Tab** — go to the next virtual desktop that has windows on it, at once;
   Win+Shift+Tab goes back. With no other one that has windows, it goes to an
-  empty desktop - a new one, if there is no other desktop at all. Task View
-  moves to Win+Ctrl+Tab.
+  empty desktop - a new one, if there is no other desktop at all, which stays
+  like one made with Win+Ctrl+D. Task View moves to Win+Ctrl+Tab.
 
 Moving and resizing feel like the real thing: windows still snap to the screen
 edges, dragging one to the top still offers the Windows 11 snap layouts, and
