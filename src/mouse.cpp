@@ -265,19 +265,16 @@ bool OpenHole(HWND content, POINT pt) {
     return true;
 }
 
-void UncoverAndPress(HWND root, const MSG* msg) {
-    RestoreUncovered();
-    // A window too busy to get to it in time doesn't press long after the
-    // fact: the press is lost, the way it would be to a window that hangs.
-    if (g_uninitializing || GetTickCount() - msg->time > kUncoverMaxWaitMs) {
-        return;
-    }
+// The holes under the cursor, in the content of `root` there. Returns whether
+// one opened.
+bool UncoverUnderCursor(HWND root) {
     // In pixels, whatever the application is aware of: the region, the
     // cursor and the window under it all have to agree.
     DPI_AWARENESS_CONTEXT previous = SetThreadDpiAwarenessContext(
         DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     POINT pt;
     GetCursorPos(&pt);
+    bool opened = false;
     HWND content = CompositionContentAt(WindowFromPoint(pt), pt);
     if (content && GetAncestor(content, GA_ROOT) == root) {
         // Such content can lie on more of it - File Explorer's title bar on
@@ -293,8 +290,7 @@ void UncoverAndPress(HWND root, const MSG* msg) {
         }
         std::lock_guard<std::mutex> lock(g_uncoveredMutex);
         // Once the teardown has closed everything there was, nothing new is
-        // opened for it to miss: the press goes in as it is.
-        bool opened = false;
+        // opened for it to miss.
         for (HWND layer : search.layers) {
             opened |= !g_uninitializing && OpenHole(layer, pt);
         }
@@ -304,15 +300,38 @@ void UncoverAndPress(HWND root, const MSG* msg) {
             DestroyWindow(patch);
         }
     }
+    SetThreadDpiAwarenessContext(previous);
+    return opened;
+}
+
+// What the shell's hook takes for a drag: the left or the right button going
+// down, nothing else.
+bool IsTakenPress(LPARAM lParam) {
+    return HIWORD(lParam) == 0 && (LOWORD(lParam) == MOUSEEVENTF_LEFTDOWN ||
+                                   LOWORD(lParam) == MOUSEEVENTF_RIGHTDOWN);
+}
+
+// The request is a message let through UIPI, so that the shell's hook can
+// reach elevated windows - which lets any process send it. So the press goes
+// in again only as the hook asks for it: a drag's button, with the modifier
+// held this moment, through a hole that opened. Anything else presses
+// nothing.
+void UncoverAndPress(HWND root, const MSG* msg) {
+    RestoreUncovered();
+    // A window too busy to get to it in time doesn't press long after the
+    // fact: the press is lost, the way it would be to a window that hangs.
+    if (g_uninitializing || GetTickCount() - msg->time > kUncoverMaxWaitMs ||
+        !IsTakenPress(msg->lParam) || !IsDragModifierDown() ||
+        !UncoverUnderCursor(root)) {
+        return;
+    }
 
     // On the hole, where the cursor is: the shell's hook keeps it there for
     // as long as the press is waiting to go in again.
     INPUT input{};
     input.type = INPUT_MOUSE;
     input.mi.dwFlags = LOWORD(msg->lParam);
-    input.mi.mouseData = HIWORD(msg->lParam);
     input.mi.dwExtraInfo = kReplayMarker;
-    SetThreadDpiAwarenessContext(previous);
     if (!SendInput(1, &input, sizeof(input))) {
         RestoreUncovered();  // no press is coming to close it
     }

@@ -1742,9 +1742,7 @@ static void TestMoveResize() {
     GetWindowRect(bar, &barRect);
     SetCursorPos((barRect.left + barRect.right) / 2,
                  (barRect.top + barRect.bottom) / 2);
-    MSG uncover{};
-    uncover.time = GetTickCount();  // no button: nothing is pressed again
-    UncoverAndPress(hwnd, &uncover);
+    UncoverUnderCursor(hwnd);  // the holes alone: nothing is pressed again
     HRGN barHole = CreateRectRgn(0, 0, 0, 0);
     HRGN contentHole = CreateRectRgn(0, 0, 0, 0);
     CHECK(GetWindowRgn(bar, barHole) != ERROR &&
@@ -1757,6 +1755,69 @@ static void TestMoveResize() {
     DeleteObject(barHole);
     DeleteObject(contentHole);
     DestroyWindow(bar);
+
+    // The request is a message any process can send, UIPI letting it through
+    // for the shell's hook: only a drag's press, with the modifier held, is
+    // pressed again - and the press goes in only through a hole, so no hole
+    // means nothing pressed.
+    CHECK(IsTakenPress(MAKELPARAM(MOUSEEVENTF_LEFTDOWN, 0)) &&
+              IsTakenPress(MAKELPARAM(MOUSEEVENTF_RIGHTDOWN, 0)) &&
+              !IsTakenPress(MAKELPARAM(MOUSEEVENTF_LEFTUP, 0)) &&
+              !IsTakenPress(MAKELPARAM(MOUSEEVENTF_MIDDLEDOWN, 0)) &&
+              !IsTakenPress(MAKELPARAM(MOUSEEVENTF_XDOWN, XBUTTON1)) &&
+              !IsTakenPress(MAKELPARAM(MOUSEEVENTF_LEFTDOWN, 1)) &&
+              !IsTakenPress(MAKELPARAM(MOUSEEVENTF_LEFTDOWN |
+                                           MOUSEEVENTF_MOVE |
+                                           MOUSEEVENTF_ABSOLUTE,
+                                       0)),
+          "a request is pressed again only as a left or right button going "
+          "down");
+    auto requestOpensHole = [&](LPARAM flags, bool modifierHeld) {
+        INPUT key{};
+        key.type = INPUT_KEYBOARD;
+        key.ki.wVk = useAlt ? VK_MENU : VK_LWIN;
+        key.ki.dwFlags = useAlt ? 0 : KEYEVENTF_EXTENDEDKEY;
+        key.ki.dwExtraInfo = kInjectedMarker;
+        if (modifierHeld) {
+            SendInput(1, &key, sizeof(key));
+            PumpRaw(30);
+        }
+        MSG request{};
+        request.hwnd = hwnd;
+        request.lParam = flags;
+        request.time = GetTickCount();
+        UncoverAndPress(hwnd, &request);
+        HRGN rgn = CreateRectRgn(0, 0, 0, 0);
+        bool holed = GetWindowRgn(content, rgn) != ERROR;
+        DeleteObject(rgn);
+        RestoreUncovered();
+        if (modifierHeld) {
+            // Let go of after a key of no meaning, as the mod's own mask
+            // does, so that it is no tap of Alt or Win on its own.
+            INPUT mask[3]{};
+            for (INPUT& in : mask) {
+                in.type = INPUT_KEYBOARD;
+                in.ki.dwExtraInfo = kInjectedMarker;
+            }
+            mask[0].ki.wVk = mask[1].ki.wVk = kMaskVk;
+            mask[1].ki.dwFlags = KEYEVENTF_KEYUP;
+            mask[2] = key;
+            mask[2].ki.dwFlags |= KEYEVENTF_KEYUP;
+            SendInput(ARRAYSIZE(mask), mask, sizeof(INPUT));
+            PumpRaw(50);
+        }
+        return holed;
+    };
+    CHECK(!requestOpensHole(MAKELPARAM(MOUSEEVENTF_LEFTDOWN, 0), false),
+          "without the modifier held, a request opens no hole and presses "
+          "nothing");
+    CHECK(!requestOpensHole(MAKELPARAM(MOUSEEVENTF_LEFTUP, 0), true) &&
+              !requestOpensHole(MAKELPARAM(MOUSEEVENTF_LEFTDOWN |
+                                               MOUSEEVENTF_MOVE |
+                                               MOUSEEVENTF_ABSOLUTE,
+                                           0),
+                                true),
+          "nor with the modifier held, when it is not a drag's press");
 
     g_settings.modifierClick = ModifierClick::App;
     contentClicks = 0;

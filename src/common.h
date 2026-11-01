@@ -322,8 +322,8 @@ enum DragKind : WPARAM {
     kDragUnsnap = 4,
     // From the shell's mouse hook: a press it took over content that gets its
     // input past the message queue, to be pressed again where the window sees
-    // it, with the MOUSEEVENTF_ flag and the X button in lParam - see
-    // mouse.cpp.
+    // it, with the MOUSEEVENTF_ flag of the left or right button going down
+    // in lParam - see mouse.cpp.
     kDragUncover = 5,
     // And once that press has gone through: the window covers up again.
     kDragCover = 6,
