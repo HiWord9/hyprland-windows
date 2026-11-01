@@ -105,7 +105,10 @@ Magnification ScreenMagnification() {
     if (!FindWindowW(L"MagUIClass", nullptr)) {
         return none;
     }
-    HMODULE lib = LoadLibraryW(L"magnification.dll");
+    // From System32 only: in a program run from a folder anyone can write
+    // to, a DLL of that name next to it would be loaded instead.
+    HMODULE lib = LoadLibraryExW(L"magnification.dll", nullptr,
+                                 LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!lib) {
         return none;
     }
