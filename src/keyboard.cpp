@@ -158,7 +158,7 @@ bool HandleEscInAltDrag(bool keyUp) {
     if (keyUp) {
         return std::exchange(g_escForLoop, false);
     }
-    if (!(GetAsyncKeyState(VK_MENU) & 0x8000)) {
+    if (!AltKeyDown()) {
         return false;
     }
     HWND loop = ForegroundMoveSizeWindow();

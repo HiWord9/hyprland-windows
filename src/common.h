@@ -26,6 +26,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -290,6 +291,7 @@ constexpr ULONG_PTR kReplayMarker = 0x48797073;  // 'Hyps'
 void ArmWinMask(bool usingWin, bool usingAlt = false);
 void MaskModifierTap();
 bool WinKeyDown();
+bool AltKeyDown();
 bool IsShellProcess();
 bool IsElevatedProcess();
 void StartKeyboardServer();

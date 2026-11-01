@@ -27,11 +27,8 @@
 UINT g_msgDrag;  // RegisterWindowMessage, set in Wh_ModInit
 
 bool IsDragModifierDown() {
-    if (g_settings.dragModifier == DragModifier::Alt) {
-        return (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
-    }
-    return ((GetAsyncKeyState(VK_LWIN) | GetAsyncKeyState(VK_RWIN)) & 0x8000) !=
-           0;
+    return g_settings.dragModifier == DragModifier::Alt ? AltKeyDown()
+                                                        : WinKeyDown();
 }
 
 // The other one of Win and Alt, held along with the modifier: the left button
@@ -43,12 +40,10 @@ bool IsLeftResizeDown() {
         return false;
     }
     if (g_settings.dragModifier == DragModifier::Alt) {
-        return ((GetAsyncKeyState(VK_LWIN) | GetAsyncKeyState(VK_RWIN)) &
-                0x8000) != 0;
+        return WinKeyDown();
     }
     return g_settings.keepAspectVk != VK_MENU &&
-           g_settings.snapModifierVk != VK_MENU &&
-           (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+           g_settings.snapModifierVk != VK_MENU && AltKeyDown();
 }
 
 // Whether a system move/resize loop is running on a thread.

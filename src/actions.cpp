@@ -168,8 +168,7 @@ bool MatchesShortcut(const Hotkey& binding, UINT vk, bool now) {
     bool ctrl = held(VK_CONTROL);
     bool alt = held(VK_MENU);
     bool shift = held(VK_SHIFT);
-    bool win =
-        ((GetAsyncKeyState(VK_LWIN) | GetAsyncKeyState(VK_RWIN)) & 0x8000) != 0;
+    bool win = WinKeyDown();
     return ctrl == binding.ctrl && alt == binding.alt &&
            shift == binding.shift && win == binding.win;
 }
