@@ -239,8 +239,10 @@ BOOL CALLBACK FindLayerProc(HWND child, LPARAM lParam) {
     return TRUE;
 }
 
-// Under g_uncoveredMutex.
-bool OpenHole(HWND content, POINT pt) {
+// Not under g_uncoveredMutex: the content can be another thread's, and
+// SetWindowRgn on its window waits for that thread. The hole is added to
+// `holes`, for the caller to record.
+bool OpenHole(HWND content, POINT pt, std::vector<Uncovered>* holes) {
     RECT rc;
     GetWindowRect(content, &rc);
     HRGN saved = CreateRectRgn(0, 0, 0, 0);
@@ -264,7 +266,7 @@ bool OpenHole(HWND content, POINT pt) {
         }
         return false;
     }
-    g_uncovered.push_back({content, saved, GetCurrentThreadId()});
+    holes->push_back({content, saved, GetCurrentThreadId()});
     return true;
 }
 
@@ -291,16 +293,32 @@ bool UncoverUnderCursor(HWND root) {
         if (patch) {
             DwmFlush();
         }
-        std::lock_guard<std::mutex> lock(g_uncoveredMutex);
-        // Once the teardown has closed everything there was, nothing new is
-        // opened for it to miss.
+        std::vector<Uncovered> holes;
         for (HWND layer : search.layers) {
-            opened |= !g_uninitializing && OpenHole(layer, pt);
+            if (!g_uninitializing) {
+                OpenHole(layer, pt, &holes);
+            }
         }
-        if (patch && opened) {
-            g_patches.push_back({patch, GetCurrentThreadId()});
-        } else if (patch) {
-            DestroyWindow(patch);
+        // Recorded under the lock - unless the teardown has closed everything
+        // there was meanwhile, and would miss these: they close again here.
+        {
+            std::lock_guard<std::mutex> lock(g_uncoveredMutex);
+            opened = !g_uninitializing && !holes.empty();
+            if (opened) {
+                g_uncovered.insert(g_uncovered.end(), holes.begin(),
+                                   holes.end());
+                if (patch) {
+                    g_patches.push_back({patch, GetCurrentThreadId()});
+                }
+            }
+        }
+        if (!opened) {
+            for (const Uncovered& u : holes) {
+                SetWindowRgn(u.hwnd, u.region, FALSE);
+            }
+            if (patch) {
+                DestroyWindow(patch);
+            }
         }
     }
     SetThreadDpiAwarenessContext(previous);
