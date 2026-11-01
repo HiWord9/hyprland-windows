@@ -398,6 +398,7 @@ int DoubleClickTimeMs();
 bool IsDoubleClickAt(HWND root, POINT pt, DWORD tick);
 bool TakeWindowAction(MSG* msg, WindowAction action);
 bool CanTakeAction(HWND root, WindowAction action);
+bool CanTakeActionUnderCursor(HWND root, WindowAction action);
 bool CanScale(HWND root);
 void ScaleWindow(HWND root, int wheelDelta);
 void RequestWindowAction(HWND root, WindowAction action);

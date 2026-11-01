@@ -86,6 +86,18 @@ bool CanTakeAction(HWND root, WindowAction action) {
            !(GetClassLongPtrW(root, GCL_STYLE) & CS_NOCLOSE);
 }
 
+// With the mouse, the window is the one under the cursor rather than the
+// focused one - and that can be one that never takes the focus at all, a
+// flyout or a thumbnail of the shell, which closed breaks that part of the
+// shell until it restarts. So a window closed this way is a visible one that
+// is not a tool window, too.
+bool CanTakeActionUnderCursor(HWND root, WindowAction action) {
+    return CanTakeAction(root, action) &&
+           (action != WindowAction::Close ||
+            (IsWindowVisible(root) &&
+             !(GetWindowLongPtrW(root, GWL_EXSTYLE) & WS_EX_TOOLWINDOW)));
+}
+
 void RequestWindowAction(HWND root, WindowAction action) {
     if (!PostMessageW(root, g_msgDrag, kDragAction, (LPARAM)action)) {
         Wh_Log(L"Action request for %p failed (%u)", root, GetLastError());
@@ -186,7 +198,7 @@ bool HandleShortcutButton(const MSG* msg) {
     if (!root) {
         root = msg->hwnd;
     }
-    if (!CanTakeAction(root, action)) {
+    if (!CanTakeActionUnderCursor(root, action)) {
         return false;  // desktop, taskbar, menus... - normal click
     }
 

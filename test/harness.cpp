@@ -3400,6 +3400,17 @@ static void TestGestures() {
     CHECK(!CanTakeAction(popup, WindowAction::Close),
           "but not while disabled, behind a dialog of its own");
     EnableWindow(popup, TRUE);
+    CHECK(CanTakeActionUnderCursor(popup, WindowAction::Close),
+          "and the mouse may close it too");
+    LONG_PTR popupEx = GetWindowLongPtrW(popup, GWL_EXSTYLE);
+    SetWindowLongPtrW(popup, GWL_EXSTYLE, popupEx | WS_EX_TOOLWINDOW);
+    CHECK(CanTakeAction(popup, WindowAction::Close) &&
+              !CanTakeActionUnderCursor(popup, WindowAction::Close) &&
+              CanTakeActionUnderCursor(popup, WindowAction::None) ==
+                  CanTakeAction(popup, WindowAction::None),
+          "but a tool window - a flyout of the shell, say - is the "
+          "keyboard's to close, not the mouse's");
+    SetWindowLongPtrW(popup, GWL_EXSTYLE, popupEx);
     RequestWindowAction(popup, WindowAction::Close);
     Pump(400);
     CHECK(!IsWindow(popup), "the close action closes the borderless one");

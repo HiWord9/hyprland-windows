@@ -414,7 +414,7 @@ bool TakeShortcutPress(int button, POINT pt) {
         return false;
     }
     HWND root = GetAncestor(WindowFromPoint(pt), GA_ROOT);
-    if (!CanTakeAction(root, action)) {
+    if (!CanTakeActionUnderCursor(root, action)) {
         return false;  // desktop, taskbar, menus... - a normal click
     }
     ArmWinMask(shortcut.win, shortcut.alt);
