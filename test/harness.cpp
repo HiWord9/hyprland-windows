@@ -829,6 +829,30 @@ static void TestMessageHook() {
     PumpRaw(400);
     CHECK(IsFrameless(hwnd), "a reloaded mod hooks the thread again");
 
+    // The hook on sent messages is for border colors and for a touchpad's
+    // two fingers alike: with the settings as they come - no border color,
+    // the wheel on - it is there, and only with neither is it taken off.
+    COLORREF wasActive = g_settings.borderActive;
+    COLORREF wasInactive = g_settings.borderInactive;
+    bool wasWheel = g_settings.wheelScale;
+    g_settings.borderActive = g_settings.borderInactive = kColorUntouched;
+    g_settings.wheelScale = true;
+    RefreshCallWndProcHooks();
+    auto sentHooked = [] {
+        std::lock_guard<std::mutex> lock(g_messageHooksMutex);
+        auto it = g_messageHooks.find(GetCurrentThreadId());
+        return it != g_messageHooks.end() && it->second.callWndProc;
+    };
+    CHECK(sentHooked(),
+          "with no border color but the wheel on, the hook on sent messages "
+          "is in, for the touchpad");
+    g_settings.wheelScale = false;
+    RefreshCallWndProcHooks();
+    CHECK(!sentHooked(), "with neither, it is taken off");
+    g_settings.borderActive = wasActive;
+    g_settings.borderInactive = wasInactive;
+    g_settings.wheelScale = wasWheel;
+
     RemoveMessageHooks();
     RequestFrameless(hwnd, kActionShow);
     Pump(200);

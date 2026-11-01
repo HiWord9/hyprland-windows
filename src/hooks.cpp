@@ -120,8 +120,10 @@ void ProcessRetrievedMessage(MSG* msg) {
 // retrieves; the second is for the ones sent to its windows, which never go
 // near a queue - a window says that it has gained or lost focus by being sent
 // WM_NCACTIVATE, and that is the only word the mod gets about a window it has
-// not otherwise touched. The second one is only installed when there is a
-// border color to paint with, because until then it listens for nothing.
+// not otherwise touched - and a touchpad's two fingers are about to go to
+// the app by DM_POINTERHITTEST, sent too (mouse.cpp). So the second one is
+// installed for either: a border color to paint with, or the mouse wheel
+// scaling windows; with neither, it listens for nothing.
 struct ThreadHooks {
     HHOOK getMessage = nullptr;
     HHOOK callWndProc = nullptr;
@@ -154,6 +156,10 @@ LRESULT CALLBACK GetMessageProc(int code, WPARAM wParam, LPARAM lParam) {
         }
     }
     return CallNextHookEx(nullptr, code, wParam, lParam);
+}
+
+bool CallWndProcHookWanted() {
+    return BorderColorsWanted() || g_settings.wheelScale;
 }
 
 LRESULT CALLBACK CallWndProc(int code, WPARAM wParam, LPARAM lParam) {
@@ -201,7 +207,7 @@ void InstallMessageHookLocked(DWORD threadId) {
                    GetLastError());
         }
     }
-    if (!hooks.callWndProc && BorderColorsWanted()) {
+    if (!hooks.callWndProc && CallWndProcHookWanted()) {
         hooks.callWndProc =
             SetWindowsHookExW(WH_CALLWNDPROC, CallWndProc, nullptr, threadId);
         if (!hooks.callWndProc) {
@@ -270,10 +276,10 @@ void RemoveMessageHooks() {
     g_messageHooks.clear();
 }
 
-// The settings can take the border colors away again, and then there is
-// nothing left for the hook on sent messages to listen for.
+// The settings can take the border colors and the wheel away again, and then
+// there is nothing left for the hook on sent messages to listen for.
 void RefreshCallWndProcHooks() {
-    if (BorderColorsWanted()) {
+    if (CallWndProcHookWanted()) {
         InstallMessageHooks();
         return;
     }
